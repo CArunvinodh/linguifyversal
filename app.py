@@ -47,18 +47,30 @@ def humanize_text(text, use_passive, use_synonyms):
     except Exception as e:
         return f"❌ Error processing text: {str(e)}"
 
-def process_file(file):
+def process_file(file, max_size_mb=20):
     """
-    Handle file uploads
+    Safely handle uploaded text files for Gradio.
+    Reads file in chunks and enforces max file size.
     """
-    if file is not None:
-        try:
-            with open(file.name, "r", encoding="utf-8", errors="ignore") as f:
-                file_text = f.read()
-            return file_text
-        except Exception as e:
-            return f"❌ Error reading file: {str(e)}"
-    return ""
+    if file is None:
+        return ""
+    
+    try:
+        # Limit file size
+        file_size = file.size if hasattr(file, "size") else 0
+        if file_size > max_size_mb * 1024 * 1024:
+            return f"❌ File too large! Max allowed is {max_size_mb} MB."
+        
+        # Read file line by line (streaming)
+        lines = []
+        with open(file.name, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                lines.append(line)
+        return "".join(lines)
+    
+    except Exception as e:
+        return f"❌ Error reading file: {str(e)}"
+
 
 # Create Gradio interface
 with gr.Blocks(
@@ -118,8 +130,11 @@ with gr.Blocks(
             file_upload = gr.File(
                 label="Upload a .txt File",
                 file_types=[".txt"],
-                file_count="single"
+                file_count="single",
+                # Optional: enforce max size in frontend (helpful UX)
+                file_size_limit=20*1024*1024  # 20 MB
             )
+
             gr.Markdown("*You can also paste text directly in the input box*")
             
         with gr.Column(scale=2):
@@ -166,13 +181,20 @@ with gr.Blocks(
     
     # Event handlers
     def process_all(text, file, passive, synonyms):
-        # If file is uploaded, use file content
+        """
+        Process text input or uploaded file safely.
+        """
+        # If a file is uploaded, replace the text input
         if file is not None:
             file_content = process_file(file)
-            if file_content and not file_content.startswith("❌"):
-                text = file_content
+            # If file reading fails, show error
+            if file_content.startswith("❌"):
+                return file_content
+            text = file_content
         
+        # Process the text normally
         return humanize_text(text, passive, synonyms)
+
     
     # Connect the button
     process_btn.click(
@@ -198,3 +220,4 @@ if __name__ == "__main__":
         favicon_path=None,
         inbrowser=False
     )
+
