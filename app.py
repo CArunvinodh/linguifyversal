@@ -143,15 +143,11 @@ with gr.Blocks(
             use_synonyms = gr.Checkbox(label="Replace with Formal Synonyms", value=False)
             
             gr.Markdown("---")
-            gr.Markdown("### 📂 File Upload")
-            file_upload = gr.File(
-                label=f"Upload a .txt File (Max {config['max_file_size_mb']}MB)",
-                file_types=[".txt"],
-                file_count="single",
-                # CRITICAL: This must match your config
-                file_size_limit=config['max_file_size_mb'] * 1024 * 1024
-            )
-            gr.Markdown(f"*Max {config['max_file_size_mb']}MB • {config['max_text_length']} characters*")
+            # In your Gradio interface, replace the file upload section with:
+            gr.Markdown("### 📝 Text Input")
+            gr.Markdown("Please paste your text directly below. File upload is disabled in this environment.")
+            
+            # Remove all file upload related components and event handlers
 
         with gr.Column(scale=2):
             gr.Markdown("### 📝 Input Text")
@@ -221,3 +217,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to launch app: {e}")
         sys.exit(1)
+
