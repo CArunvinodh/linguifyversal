@@ -1,184 +1,149 @@
-import gradio as gr
-import os
-import sys
+# app.py - FastAPI version
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from transformer.app import AcademicTextHumanizer, NLP_GLOBAL, download_nltk_resources
 from nltk.tokenize import word_tokenize
+import os
 
-# Much stricter limits for cloud deployment
-def get_server_config():
-    """Get server configuration with very conservative limits"""
-    is_cloud_deployment = os.environ.get('VERCEL') or os.environ.get('CLOUD_DEPLOYMENT')
-    
-    # For cloud deployments, use VERY conservative limits
-    if is_cloud_deployment:
-        config = {
-            'max_file_size_mb': 1,  # Only 1MB for cloud
-            'max_text_length': 10000,  # 10K characters
-            'max_word_count': 2000,   # 2K words
-        }
-    else:
-        config = {
-            'max_file_size_mb': 5,
-            'max_text_length': 50000,
-            'max_word_count': 10000,
-        }
-    return config
-
-config = get_server_config()
 download_nltk_resources()
 
-def humanize_text(text, use_passive, use_synonyms):
-    """
-    Main processing function with strict size validation
-    """
+app = FastAPI(title="Linguify")
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class ProcessRequest(BaseModel):
+    text: str
+    use_passive: bool = False
+    use_synonyms: bool = False
+
+class ProcessResponse(BaseModel):
+    result: str
+    error: str = None
+
+def humanize_text_safe(text, use_passive, use_synonyms):
+    """Safe text processing with limits"""
     if not text.strip():
         return "⚠️ Please enter text to begin refinement."
     
-    # Strict validation
-    if len(text) > config['max_text_length']:
-        return f"⚠️ Text too long! Maximum {config['max_text_length']} characters allowed. Your text: {len(text)} characters"
+    # Strict limits for serverless
+    if len(text) > 10000:
+        return "⚠️ Text too long! Maximum 10,000 characters allowed."
     
     try:
         input_word_count = len(word_tokenize(text, language='english', preserve_line=True))
-        
-        if input_word_count > config['max_word_count']:
-            return f"⚠️ Text too large! Please split into smaller sections (max {config['max_word_count']} words)."
+        if input_word_count > 2000:
+            return "⚠️ Text too large! Maximum 2,000 words allowed."
             
-        # Your processing logic here
-        doc_input = NLP_GLOBAL(text)
-        input_sentence_count = len(list(doc_input.sents))
-
         humanizer = AcademicTextHumanizer(
             p_passive=0.3,
             p_synonym_replacement=0.3,
             p_academic_transition=0.4
         )
         
-        transformed = humanizer.humanize_text(
-            text,
-            use_passive=use_passive,
-            use_synonyms=use_synonyms
-        )
-
+        transformed = humanizer.humanize_text(text, use_passive, use_synonyms)
         output_word_count = len(word_tokenize(transformed, language='english', preserve_line=True))
-        doc_output = NLP_GLOBAL(transformed)
-        output_sentence_count = len(list(doc_output.sents))
         
-        stats = f"""
+        return f"""
 📊 **Text Statistics:**
-- **Input:** {input_word_count} words, {input_sentence_count} sentences
-- **Output:** {output_word_count} words, {output_sentence_count} sentences
+- **Input:** {input_word_count} words
+- **Output:** {output_word_count} words
 
 🎓 **Refined Text:**
 {transformed}
 """
-        return stats
-        
     except Exception as e:
         return f"❌ Error processing text: {str(e)}"
 
-# Create Gradio interface with ULTRA conservative settings
-with gr.Blocks(
-    theme=gr.themes.Soft(primary_hue="blue", secondary_hue="blue"),
-    css="""
-    .gradio-container { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); }
-    .header {
-        text-align: center; padding: 2rem;
-        background: linear-gradient(90deg, #0072ff, #00c6ff);
-        border-radius: 16px; color: white; margin-bottom: 2rem;
-    }
-    .output-box {
-        background: white; padding: 1.5rem; border-radius: 12px;
-        border: 1px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    """
-) as demo:
-    
-    gr.HTML("""
-    <div class="header">
-        <h1 style="margin:0; font-size:2.5em; font-weight:800;">Linguify 🪶</h1>
-        <p style="margin:0; font-size:1.2em; opacity:0.9;">
-            Refine and Humanize AI-generated content into polished academic writing
-        </p>
-    </div>
-    """)
-    
-    with gr.Row():
-        with gr.Column(scale=1):
-            gr.Markdown("### ⚙️ Linguify Options")
-            use_passive = gr.Checkbox(label="Convert sentences to Passive Voice", value=False)
-            use_synonyms = gr.Checkbox(label="Replace with Formal Synonyms", value=False)
-            
-            gr.Markdown("---")
-            gr.Markdown("### 📝 Text Input")
-            gr.Markdown("Please paste your text directly in the input box. File upload is disabled in this environment.")
-            
-            # Display current limits to users
-            gr.Markdown(f"""
-            **Current Limits:**
-            - 📄 Max text length: {config['max_text_length']} characters
-            - 📝 Max word count: {config['max_word_count']} words
-            """)
-
-        with gr.Column(scale=2):
-            gr.Markdown("### 📝 Input Text")
-            input_text = gr.Textbox(
-                placeholder=f"Type or paste your text here... (Max {config['max_text_length']} characters)",
-                lines=8,
-                show_label=False,
-                max_lines=8
-            )
-            
-            process_btn = gr.Button("✨ Refine with Linguify", variant="primary", size="lg")
-            
-            gr.Markdown("### 🎓 Refined Output")
-            output_text = gr.Markdown(show_label=False)
-    
-    # Examples with smaller text
-    gr.Markdown("### 💡 Example Inputs")
-    gr.Examples(
-        examples=[
-            ["AI technology enhances productivity across organizations."],
-            ["We should optimize efficiencies through innovative solutions."],
-            ["The company uses cutting-edge solutions to drive innovation."]
-        ],
-        inputs=input_text
-    )
-    
-    gr.HTML("""
-    <div style="text-align: center; margin-top: 2rem; padding: 1rem; border-top: 1px solid #e2e8f0;">
-        <p style="margin: 0; color: #64748b;">🪶 Linguify — Academic Text Refiner</p>
-    </div>
-    """)
-    
-    def process_text_only(text, passive, synonyms):
-        """
-        Process text input only (no file upload)
-        """
-        return humanize_text(text, passive, synonyms)
-    
-    # Connect the button - REMOVED file_upload from inputs
-    process_btn.click(
-        fn=process_text_only,
-        inputs=[input_text, use_passive, use_synonyms],
-        outputs=output_text
-    )
-
-# Launch with memory-conscious settings
-if __name__ == "__main__":
+@app.post("/process", response_model=ProcessResponse)
+async def process_text(request: ProcessRequest):
     try:
-        demo.launch(
-            share=False,
-            server_name="0.0.0.0",
-            server_port=int(os.environ.get("PORT", 7860)),
-            show_error=True,
-            inbrowser=False,
-            # Critical for memory management
-            max_file_size=f"{config['max_file_size_mb']}MB",
-            quiet=True,  # Reduce logging overhead
-            # Prevent Gradio from preloading large files
-            prevent_thread_lock=True
-        )
+        result = humanize_text_safe(request.text, request.use_passive, request.use_synonyms)
+        return ProcessResponse(result=result)
     except Exception as e:
-        print(f"Failed to launch app: {e}")
-        sys.exit(1)
+        return ProcessResponse(result="", error=str(e))
+
+# Simple HTML frontend
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    return """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Linguify 🪶</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; background: linear-gradient(90deg, #0072ff, #00c6ff); color: white; padding: 2rem; border-radius: 16px; }
+        .output { background: white; padding: 1.5rem; border-radius: 12px; border: 1px solid #e2e8f0; margin-top: 1rem; }
+        textarea { width: 100%; height: 200px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #0072ff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        .loading { display: none; color: #0072ff; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Linguify 🪶</h1>
+        <p>Refine and Humanize AI-generated content into polished academic writing</p>
+    </div>
+    
+    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 20px; margin-top: 2rem;">
+        <div>
+            <h3>⚙️ Linguify Options</h3>
+            <label><input type="checkbox" id="passive"> Convert to Passive Voice</label><br>
+            <label><input type="checkbox" id="synonyms"> Use Formal Synonyms</label>
+            <p><small>Max: 10,000 characters, 2,000 words</small></p>
+        </div>
+        
+        <div>
+            <h3>📝 Input Text</h3>
+            <textarea id="inputText" placeholder="Type or paste your text here..."></textarea>
+            <button onclick="processText()">✨ Refine with Linguify</button>
+            <div id="loading" class="loading">Processing...</div>
+            
+            <h3>🎓 Refined Output</h3>
+            <div id="output" class="output">Results will appear here...</div>
+        </div>
+    </div>
+
+    <script>
+        async function processText() {
+            const text = document.getElementById('inputText').value;
+            const passive = document.getElementById('passive').checked;
+            const synonyms = document.getElementById('synonyms').checked;
+            const loading = document.getElementById('loading');
+            const output = document.getElementById('output');
+            
+            loading.style.display = 'block';
+            output.innerHTML = 'Processing...';
+            
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, use_passive: passive, use_synonyms: synonyms })
+                });
+                
+                const data = await response.json();
+                output.innerHTML = data.result || data.error;
+            } catch (error) {
+                output.innerHTML = '❌ Error connecting to server';
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 7860)))
