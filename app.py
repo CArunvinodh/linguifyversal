@@ -191,10 +191,10 @@ with gr.Blocks(
 # Launch the app
 if __name__ == "__main__":
     demo.launch(
-        share=False,  # Set to True for public link
+        share=False,
         server_name="0.0.0.0",
-        server_port=7860,
-        show_error=True, 
-        favicon_path=None, 
+        server_port=int(os.environ.get("PORT", 7860)),  # <-- important for Vercel
+        show_error=True,
+        favicon_path=None,
         inbrowser=False
     )
