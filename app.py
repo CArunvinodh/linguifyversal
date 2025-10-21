@@ -1,19 +1,45 @@
 import gradio as gr
+import os
+import sys
 from transformer.app import AcademicTextHumanizer, NLP_GLOBAL, download_nltk_resources
 from nltk.tokenize import word_tokenize
+
+# Environment-specific settings
+def get_server_config():
+    """Get server configuration based on environment"""
+    is_cloud_deployment = os.environ.get('VERCEL') or os.environ.get('CLOUD_DEPLOYMENT')
+    
+    config = {
+        'max_file_size_mb': 2 if is_cloud_deployment else 5,  # Reduced for safety
+        'max_text_length': 25000 if is_cloud_deployment else 50000,
+        'max_word_count': 5000 if is_cloud_deployment else 10000,
+    }
+    return config
+
+# Get configuration
+config = get_server_config()
 
 # Download NLTK resources if needed
 download_nltk_resources()
 
 def humanize_text(text, use_passive, use_synonyms):
     """
-    Main processing function - replaces your Streamlit logic
+    Main processing function with size validation
     """
     if not text.strip():
         return "⚠️ Please enter text to begin refinement."
     
+    # Validate input size using config
+    if len(text) > config['max_text_length']:
+        return f"⚠️ Text too long! Maximum {config['max_text_length']} characters allowed. Your text: {len(text)} characters"
+    
     try:
         input_word_count = len(word_tokenize(text, language='english', preserve_line=True))
+        
+        # Check for very large documents using config
+        if input_word_count > config['max_word_count']:
+            return f"⚠️ Text too large! Please split into smaller sections (max {config['max_word_count']} words)."
+            
         doc_input = NLP_GLOBAL(text)
         input_sentence_count = len(list(doc_input.sents))
 
@@ -47,32 +73,53 @@ def humanize_text(text, use_passive, use_synonyms):
     except Exception as e:
         return f"❌ Error processing text: {str(e)}"
 
-def process_file(file, max_size_mb=20):
+def process_file(file):
     """
-    Safely handle uploaded text files for Gradio.
-    Reads file in chunks and enforces max file size.
+    Safely handle uploaded text files with better memory management.
+    Uses the configured max_file_size_mb from config.
     """
     if file is None:
         return ""
     
-    try:
-        # Limit file size
-        file_size = file.size if hasattr(file, "size") else 0
-        if file_size > max_size_mb * 1024 * 1024:
-            return f"❌ File too large! Max allowed is {max_size_mb} MB."
-        
-        # Read file line by line (streaming)
-        lines = []
-        with open(file.name, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                lines.append(line)
-        return "".join(lines)
+    max_size_mb = config['max_file_size_mb']
     
+    try:
+        # Get file size safely
+        if hasattr(file, 'size'):
+            file_size = file.size
+        elif hasattr(file, 'name'):
+            file_size = os.path.getsize(file.name)
+        else:
+            return "❌ Unable to determine file size."
+        
+        # Enforce smaller size limit
+        max_size_bytes = max_size_mb * 1024 * 1024
+        if file_size > max_size_bytes:
+            return f"❌ File too large! Max allowed is {max_size_mb} MB. Your file: {file_size / (1024*1024):.1f} MB"
+        
+        # Read file with explicit encoding and size limits
+        try:
+            with open(file.name, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(max_size_bytes + 1024)  # Read with limit
+                
+                # Check if we hit the limit
+                if len(content.encode('utf-8')) >= max_size_bytes:
+                    return f"❌ File content exceeds {max_size_mb} MB limit"
+                    
+                return content
+                
+        except UnicodeDecodeError:
+            # Fallback for encoding issues
+            with open(file.name, 'r', encoding='latin-1', errors='ignore') as f:
+                content = f.read(max_size_bytes + 1024)
+                if len(content.encode('utf-8')) >= max_size_bytes:
+                    return f"❌ File content exceeds {max_size_mb} MB limit"
+                return content
+                
     except Exception as e:
         return f"❌ Error reading file: {str(e)}"
 
-
-# Create Gradio interface
+# Create Gradio interface with better file handling
 with gr.Blocks(
     theme=gr.themes.Soft(
         primary_hue="blue",
@@ -127,12 +174,12 @@ with gr.Blocks(
             
             gr.Markdown("---")
             gr.Markdown("### 📂 File Upload")
+            # Update file upload with smaller limits using config
             file_upload = gr.File(
-                label="Upload a .txt File",
+                label=f"Upload a .txt File (Max {config['max_file_size_mb']}MB)",
                 file_types=[".txt"],
                 file_count="single",
-                # Optional: enforce max size in frontend (helpful UX)
-                file_size_limit=20*1024*1024  # 20 MB
+                file_size_limit=config['max_file_size_mb'] * 1024 * 1024
             )
 
             gr.Markdown("*You can also paste text directly in the input box*")
@@ -142,7 +189,7 @@ with gr.Blocks(
             gr.Markdown("### 📝 Input Text")
             input_text = gr.Textbox(
                 label="Enter or paste your text here:",
-                placeholder="Type or paste your text here to refine...",
+                placeholder=f"Type or paste your text here to refine... (Max {config['max_text_length']} characters)",
                 lines=8,
                 show_label=False
             )
@@ -210,14 +257,18 @@ with gr.Blocks(
         outputs=input_text
     )
 
-# Launch the app
+# Launch the app with better error handling
 if __name__ == "__main__":
-    demo.launch(
-        share=False,
-        server_name="0.0.0.0",
-        server_port=int(os.environ.get("PORT", 7860)),  # <-- important for Vercel
-        show_error=True,
-        favicon_path=None,
-        inbrowser=False
-    )
-
+    try:
+        demo.launch(
+            share=False,
+            server_name="0.0.0.0",
+            server_port=int(os.environ.get("PORT", 7860)),
+            show_error=True,
+            favicon_path=None,
+            inbrowser=False,
+            max_file_size=f"{config['max_file_size_mb']}MB"  # Add Gradio-specific limit
+        )
+    except Exception as e:
+        print(f"Failed to launch app: {e}")
+        sys.exit(1)
