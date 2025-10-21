@@ -77,39 +77,6 @@ def humanize_text(text, use_passive, use_synonyms):
     except Exception as e:
         return f"❌ Error processing text: {str(e)}"
 
-def process_file(file):
-    """
-    Ultra-conservative file processing
-    """
-    if file is None:
-        return ""
-    
-    try:
-        # Immediate size check before any processing
-        if hasattr(file, 'size'):
-            file_size = file.size
-        elif hasattr(file, 'name'):
-            file_size = os.path.getsize(file.name)
-        else:
-            return "❌ Unable to determine file size."
-        
-        max_size_bytes = config['max_file_size_mb'] * 1024 * 1024
-        if file_size > max_size_bytes:
-            return f"❌ File too large! Max allowed is {config['max_file_size_mb']} MB. Your file: {file_size / (1024*1024):.1f} MB"
-        
-        # Read with strict limits
-        with open(file.name, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read(max_size_bytes)  # Don't read beyond limit
-            
-            # Additional safety check
-            if len(content) > config['max_text_length']:
-                return f"❌ File content too long! Max {config['max_text_length']} characters."
-                
-            return content
-                
-    except Exception as e:
-        return f"❌ Error reading file: {str(e)}"
-
 # Create Gradio interface with ULTRA conservative settings
 with gr.Blocks(
     theme=gr.themes.Soft(primary_hue="blue", secondary_hue="blue"),
@@ -143,11 +110,15 @@ with gr.Blocks(
             use_synonyms = gr.Checkbox(label="Replace with Formal Synonyms", value=False)
             
             gr.Markdown("---")
-            # In your Gradio interface, replace the file upload section with:
             gr.Markdown("### 📝 Text Input")
-            gr.Markdown("Please paste your text directly below. File upload is disabled in this environment.")
+            gr.Markdown("Please paste your text directly in the input box. File upload is disabled in this environment.")
             
-            # Remove all file upload related components and event handlers
+            # Display current limits to users
+            gr.Markdown(f"""
+            **Current Limits:**
+            - 📄 Max text length: {config['max_text_length']} characters
+            - 📝 Max word count: {config['max_word_count']} words
+            """)
 
         with gr.Column(scale=2):
             gr.Markdown("### 📝 Input Text")
@@ -180,24 +151,18 @@ with gr.Blocks(
     </div>
     """)
     
-    def process_all(text, file, passive, synonyms):
-        """Process text input or uploaded file safely"""
-        if file is not None:
-            file_content = process_file(file)
-            if file_content.startswith("❌"):
-                return file_content
-            text = file_content
-        
+    def process_text_only(text, passive, synonyms):
+        """
+        Process text input only (no file upload)
+        """
         return humanize_text(text, passive, synonyms)
     
+    # Connect the button - REMOVED file_upload from inputs
     process_btn.click(
-        fn=process_all,
-        inputs=[input_text, file_upload, use_passive, use_synonyms],
+        fn=process_text_only,
+        inputs=[input_text, use_passive, use_synonyms],
         outputs=output_text
     )
-    
-    # Remove auto-processing on file upload to reduce memory pressure
-    # file_upload.change(fn=process_file, inputs=file_upload, outputs=input_text)
 
 # Launch with memory-conscious settings
 if __name__ == "__main__":
@@ -217,4 +182,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to launch app: {e}")
         sys.exit(1)
-
