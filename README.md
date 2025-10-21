@@ -10,4 +10,4 @@ pinned: false
 short_description: ' Linguify — AI Humanizer is a web-based application that tra'
 ---
 
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+
