@@ -1,364 +1,276 @@
-# ===== requirements.txt =====
-# Minimal, lightweight dependencies only
-fastapi==0.115.0
-uvicorn==0.30.0
-nltk==3.8.1
-# Remove these heavy dependencies:
-# spacy  # ~500MB with models
-# sentence-transformers  # ~400MB
-# en-core-web-sm  # ~13MB but requires spacy
-
-# ===== vercel.json =====
-{
-  "version": 2,
-  "builds": [
-    {
-      "src": "app.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "app.py"
-    }
-  ]
-}
-
-# ===== .vercelignore =====
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-.git/
-.github/
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-.DS_Store
-node_modules/
-.pytest_cache/
-.mypy_cache/
-nltk_data/en_core_web_sm/
-models/
-
-# ===== app.py - Lightweight Version =====
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
-from transformer.app_lite import AcademicTextHumanizer, download_nltk_resources
-from nltk.tokenize import word_tokenize
-import os
-
-download_nltk_resources()
-
-app = FastAPI(title="Linguify")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-class ProcessRequest(BaseModel):
-    text: str
-    use_passive: bool = False
-    use_synonyms: bool = False
-
-class ProcessResponse(BaseModel):
-    result: str
-    error: str = None
-
-def humanize_text_safe(text, use_passive, use_synonyms):
-    """Safe text processing with limits"""
-    if not text or not text.strip():
-        return "⚠️ Please enter text to begin refinement."
-    
-    text = text.strip()
-    
-    if len(text) > 5000:
-        return f"⚠️ Text too long! Maximum 5,000 characters allowed."
-    
-    try:
-        input_word_count = len(word_tokenize(text, language='english', preserve_line=True))
-        
-        if input_word_count > 1000:
-            return f"⚠️ Text too large! Maximum 1,000 words allowed."
-        
-        humanizer = AcademicTextHumanizer(
-            p_passive=0.2,
-            p_synonym_replacement=0.2,
-            p_academic_transition=0.3
-        )
-        
-        transformed = humanizer.humanize_text(text, use_passive, use_synonyms)
-        
-        if not transformed:
-            return "❌ Processing returned empty result."
-        
-        if len(transformed) > 10000:
-            transformed = transformed[:10000] + "\n\n⚠️ [Output truncated]"
-        
-        output_word_count = len(word_tokenize(transformed, language='english', preserve_line=True))
-        
-        return f"""📊 **Text Statistics:**
-- **Input:** {input_word_count} words
-- **Output:** {output_word_count} words
-
-🎓 **Refined Text:**
-
-{transformed}
 """
-    except Exception as e:
-        return f"❌ Error: {str(e)[:200]}"
-
-@app.post("/process", response_model=ProcessResponse)
-async def process_text(request: ProcessRequest):
-    try:
-        result = humanize_text_safe(request.text, request.use_passive, request.use_synonyms)
-        return ProcessResponse(result=result)
-    except Exception as e:
-        return ProcessResponse(result="", error=str(e)[:200])
-
-@app.get("/", response_class=HTMLResponse)
-async def read_root():
-    return """<!DOCTYPE html>
-<html>
-<head>
-    <title>Linguify 🪶</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        .header {
-            text-align: center;
-            color: white;
-            padding: 2rem;
-            margin-bottom: 2rem;
-        }
-        .header h1 { font-size: 3rem; margin-bottom: 0.5rem; }
-        .header p { font-size: 1.2rem; opacity: 0.9; }
-        .card {
-            background: white;
-            border-radius: 16px;
-            padding: 2rem;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            margin-bottom: 1rem;
-        }
-        .options {
-            display: flex;
-            gap: 2rem;
-            margin-bottom: 1.5rem;
-            padding: 1rem;
-            background: #f8f9fa;
-            border-radius: 8px;
-        }
-        label {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-        }
-        textarea {
-            width: 100%;
-            min-height: 200px;
-            padding: 1rem;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 1rem;
-            resize: vertical;
-            font-family: inherit;
-        }
-        textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .char-count {
-            text-align: right;
-            color: #666;
-            font-size: 0.9rem;
-            margin-top: 0.5rem;
-        }
-        button {
-            width: 100%;
-            padding: 1rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-            margin-top: 1rem;
-            transition: transform 0.2s;
-        }
-        button:hover:not(:disabled) { transform: translateY(-2px); }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .output {
-            background: #f8f9fa;
-            padding: 1.5rem;
-            border-radius: 8px;
-            min-height: 150px;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            line-height: 1.6;
-        }
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 1rem;
-            color: #667eea;
-            font-weight: 600;
-        }
-        .note {
-            background: #fff3cd;
-            border: 1px solid #ffc107;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-top: 1rem;
-            font-size: 0.9rem;
-        }
-        @media (max-width: 768px) {
-            .header h1 { font-size: 2rem; }
-            .options { flex-direction: column; gap: 1rem; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🪶 Linguify</h1>
-            <p>Transform AI text into polished academic writing</p>
-        </div>
-
-        <div class="card">
-            <h2>⚙️ Transformation Options</h2>
-            <div class="options">
-                <label>
-                    <input type="checkbox" id="passive">
-                    Convert to Passive Voice
-                </label>
-                <label>
-                    <input type="checkbox" id="synonyms">
-                    Use Formal Synonyms
-                </label>
-            </div>
-
-            <h3>📝 Input Text</h3>
-            <textarea 
-                id="inputText" 
-                placeholder="Paste your text here (max 5,000 characters, 1,000 words)..."
-                maxlength="5000"
-            ></textarea>
-            <div class="char-count">
-                <span id="charCount">0</span> / 5,000 characters
-            </div>
-
-            <button id="processBtn" onclick="processText()">
-                ✨ Transform with Linguify
-            </button>
-            <div id="loading" class="loading">⏳ Processing...</div>
-
-            <div class="note">
-                ⚡ <strong>Lightweight Mode:</strong> Running without heavy ML models for faster serverless deployment
-            </div>
-        </div>
-
-        <div class="card">
-            <h3>🎓 Refined Output</h3>
-            <div id="output" class="output">Results will appear here...</div>
-        </div>
-    </div>
-
-    <script>
-        const inputText = document.getElementById('inputText');
-        const charCount = document.getElementById('charCount');
-        const processBtn = document.getElementById('processBtn');
-        
-        inputText.addEventListener('input', () => {
-            const length = inputText.value.length;
-            charCount.textContent = length.toLocaleString();
-            charCount.style.color = length > 4500 ? '#dc3545' : '#666';
-        });
-        
-        async function processText() {
-            const text = inputText.value.trim();
-            const passive = document.getElementById('passive').checked;
-            const synonyms = document.getElementById('synonyms').checked;
-            const loading = document.getElementById('loading');
-            const output = document.getElementById('output');
-            
-            if (!text) {
-                output.innerHTML = '⚠️ Please enter some text first.';
-                return;
-            }
-            
-            processBtn.disabled = true;
-            loading.style.display = 'block';
-            output.innerHTML = '⏳ Processing...';
-            
-            try {
-                const response = await fetch('/process', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        text, 
-                        use_passive: passive, 
-                        use_synonyms: synonyms 
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                
-                const data = await response.json();
-                output.innerHTML = data.error || data.result;
-                
-            } catch (error) {
-                output.innerHTML = `❌ Error: ${error.message}`;
-            } finally {
-                processBtn.disabled = false;
-                loading.style.display = 'none';
-            }
-        }
-        
-        inputText.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                processText();
-            }
-        });
-    </script>
-</body>
-</html>
+Lightweight Academic Text Humanizer
+No spacy, no sentence-transformers - pure NLTK only
+Optimized for serverless deployment
 """
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 7860)))
+import ssl
+import random
+import warnings
+import re
+
+import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import wordnet
+
+warnings.filterwarnings("ignore")
+
+def download_nltk_resources():
+    """Download required NLTK resources"""
+    try:
+        _create_unverified_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
+
+    resources = ['punkt', 'averaged_perceptron_tagger', 'wordnet', 'omw-1.4']
+    for resource in resources:
+        try:
+            nltk.download(resource, quiet=True)
+        except Exception as e:
+            print(f"Error downloading {resource}: {str(e)}")
+
+
+class AcademicTextHumanizer:
+    """
+    Lightweight text transformer using only NLTK
+    - Expands contractions
+    - Adds academic transitions
+    - Simple passive voice conversion
+    - Synonym replacement using WordNet
+    """
+
+    def __init__(
+        self,
+        p_passive=0.2,
+        p_synonym_replacement=0.3,
+        p_academic_transition=0.3,
+        seed=None
+    ):
+        if seed is not None:
+            random.seed(seed)
+
+        self.p_passive = p_passive
+        self.p_synonym_replacement = p_synonym_replacement
+        self.p_academic_transition = p_academic_transition
+
+        self.academic_transitions = [
+            "Moreover,", "Additionally,", "Furthermore,", "Hence,",
+            "Therefore,", "Consequently,", "Nonetheless,", "Nevertheless,",
+            "In addition,", "Similarly,", "Conversely,", "Subsequently,"
+        ]
+
+        # Simple passive voice patterns
+        self.common_verbs = {
+            'make': 'made', 'take': 'taken', 'give': 'given',
+            'find': 'found', 'show': 'shown', 'use': 'used',
+            'see': 'seen', 'know': 'known', 'get': 'gotten',
+            'write': 'written', 'read': 'read', 'hear': 'heard'
+        }
+
+    def humanize_text(self, text, use_passive=False, use_synonyms=False):
+        """Main transformation method"""
+        if not text or not text.strip():
+            return ""
+        
+        # Safety limits
+        if len(text) > 10000:
+            text = text[:10000]
+        
+        try:
+            sentences = sent_tokenize(text)
+            
+            # Limit sentences
+            if len(sentences) > 100:
+                sentences = sentences[:100]
+            
+            transformed_sentences = []
+            
+            for i, sent in enumerate(sentences):
+                if not sent or len(sent.strip()) == 0:
+                    continue
+                
+                sentence_str = sent.strip()
+                
+                # Limit sentence length
+                if len(sentence_str) > 500:
+                    sentence_str = sentence_str[:500]
+
+                try:
+                    # 1. Expand contractions
+                    sentence_str = self.expand_contractions(sentence_str)
+
+                    # 2. Add academic transitions (not on first sentence, not on every sentence)
+                    if i > 0 and random.random() < self.p_academic_transition:
+                        sentence_str = self.add_academic_transitions(sentence_str)
+
+                    # 3. Convert to passive voice
+                    if use_passive and random.random() < self.p_passive:
+                        sentence_str = self.convert_to_passive_simple(sentence_str)
+
+                    # 4. Replace with synonyms
+                    if use_synonyms and random.random() < self.p_synonym_replacement:
+                        sentence_str = self.replace_with_synonyms(sentence_str)
+
+                    transformed_sentences.append(sentence_str)
+                    
+                except Exception as e:
+                    print(f"Error transforming sentence: {e}")
+                    transformed_sentences.append(sent.strip())
+
+            result = ' '.join(transformed_sentences)
+            
+            # Final safety check
+            if len(result) > 20000:
+                result = result[:20000]
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error in humanize_text: {e}")
+            return text[:10000]
+
+    def expand_contractions(self, sentence):
+        """Expand common English contractions"""
+        contraction_map = {
+            "n't": " not", "'re": " are", "'s": " is", "'ll": " will",
+            "'ve": " have", "'d": " would", "'m": " am",
+            "won't": "will not", "can't": "cannot", "ain't": "am not"
+        }
+        
+        try:
+            result = sentence
+            for contraction, expansion in contraction_map.items():
+                # Case-insensitive replacement
+                pattern = re.compile(re.escape(contraction), re.IGNORECASE)
+                result = pattern.sub(expansion, result)
+            return result
+        except Exception as e:
+            print(f"Error expanding contractions: {e}")
+            return sentence
+
+    def add_academic_transitions(self, sentence):
+        """Add academic transition words"""
+        try:
+            transition = random.choice(self.academic_transitions)
+            return f"{transition} {sentence}"
+        except Exception:
+            return sentence
+
+    def convert_to_passive_simple(self, sentence):
+        """
+        Simple passive voice conversion using pattern matching
+        Only works for simple Subject-Verb-Object patterns
+        """
+        try:
+            tokens = word_tokenize(sentence)
+            pos_tags = nltk.pos_tag(tokens)
+            
+            # Look for simple SVO pattern: NOUN VERB NOUN
+            for i in range(len(pos_tags) - 2):
+                if (pos_tags[i][1].startswith('NN') and 
+                    pos_tags[i+1][1].startswith('VB') and 
+                    pos_tags[i+2][1].startswith('NN')):
+                    
+                    subject = pos_tags[i][0]
+                    verb = pos_tags[i+1][0]
+                    obj = pos_tags[i+2][0]
+                    
+                    # Get past participle form
+                    verb_base = verb.lower()
+                    if verb_base in self.common_verbs:
+                        past_part = self.common_verbs[verb_base]
+                    elif verb_base.endswith('e'):
+                        past_part = verb_base + 'd'
+                    else:
+                        past_part = verb_base + 'ed'
+                    
+                    # Create passive: Object was verb+ed by subject
+                    passive = f"{obj} was {past_part} by {subject}"
+                    
+                    # Replace in original sentence
+                    original_phrase = f"{subject} {verb} {obj}"
+                    sentence = sentence.replace(original_phrase, passive, 1)
+                    break
+            
+            return sentence
+        except Exception as e:
+            print(f"Error in passive conversion: {e}")
+            return sentence
+
+    def replace_with_synonyms(self, sentence):
+        """Replace words with formal synonyms using WordNet"""
+        try:
+            tokens = word_tokenize(sentence)
+            
+            if len(tokens) > 100:
+                tokens = tokens[:100]
+            
+            pos_tags = nltk.pos_tag(tokens)
+            new_tokens = []
+            
+            for word, pos in pos_tags:
+                # Only process content words longer than 3 characters
+                if (pos.startswith(('J', 'N', 'V', 'R')) and 
+                    len(word) > 3 and 
+                    word.isalpha() and
+                    random.random() < 0.4):  # 40% chance to replace
+                    
+                    try:
+                        synonyms = self._get_synonyms(word, pos)
+                        if synonyms:
+                            # Pick a random synonym
+                            synonym = random.choice(synonyms)
+                            # Preserve capitalization
+                            if word[0].isupper():
+                                synonym = synonym.capitalize()
+                            new_tokens.append(synonym)
+                        else:
+                            new_tokens.append(word)
+                    except Exception:
+                        new_tokens.append(word)
+                else:
+                    new_tokens.append(word)
+
+            return ' '.join(new_tokens)
+        except Exception as e:
+            print(f"Error replacing synonyms: {e}")
+            return sentence
+
+    def _get_synonyms(self, word, pos):
+        """Get synonyms from WordNet"""
+        try:
+            # Map POS tags to WordNet POS
+            wn_pos = None
+            if pos.startswith('J'):
+                wn_pos = wordnet.ADJ
+            elif pos.startswith('N'):
+                wn_pos = wordnet.NOUN
+            elif pos.startswith('R'):
+                wn_pos = wordnet.ADV
+            elif pos.startswith('V'):
+                wn_pos = wordnet.VERB
+            else:
+                return []
+
+            synonyms = []
+            synsets = wordnet.synsets(word.lower(), pos=wn_pos)
+            
+            # Check first 3 synsets only
+            for syn in synsets[:3]:
+                for lemma in syn.lemmas()[:3]:
+                    lemma_name = lemma.name().replace('_', ' ')
+                    # Only use single-word synonyms that are different
+                    if ' ' not in lemma_name and lemma_name.lower() != word.lower():
+                        synonyms.append(lemma_name)
+                    
+                    if len(synonyms) >= 5:
+                        break
+                if len(synonyms) >= 5:
+                    break
+            
+            return synonyms[:5]
+        except Exception as e:
+            print(f"Error getting synonyms: {e}")
+            return []
