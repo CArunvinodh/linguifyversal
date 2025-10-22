@@ -53,9 +53,9 @@ class AcademicTextHumanizer:
 
     def __init__(
         self,
-        p_passive=0.2,
-        p_synonym_replacement=0.3,
-        p_academic_transition=0.3,
+        p_passive=0.4,  # Increased probabilities
+        p_synonym_replacement=0.6,
+        p_academic_transition=0.5,
         seed=None
     ):
         if seed is not None:
@@ -72,18 +72,20 @@ class AcademicTextHumanizer:
             self.nlp = None
             print("⚠️ AcademicTextHumanizer: spaCy not available - using basic text processing")
 
-        # Conservative probabilities for serverless
-        self.p_passive = min(p_passive, 0.3)  # Cap at 30%
-        self.p_synonym_replacement = min(p_synonym_replacement, 0.3)
-        self.p_academic_transition = min(p_academic_transition, 0.3)
+        # Increased probabilities for better transformations
+        self.p_passive = min(p_passive, 0.6)  # Increased cap
+        self.p_synonym_replacement = min(p_synonym_replacement, 0.8)
+        self.p_academic_transition = min(p_academic_transition, 0.6)
 
-        # Common academic transitions
+        # Enhanced academic transitions
         self.academic_transitions = [
             "Moreover,", "Additionally,", "Furthermore,", "Hence,", 
-            "Therefore,", "Consequently,", "Nonetheless,", "Nevertheless,"
+            "Therefore,", "Consequently,", "Nonetheless,", "Nevertheless,",
+            "Accordingly,", "Thus,", "Notably,", "Significantly,",
+            "Importantly,", "Specifically,", "Typically,", "Generally,"
         ]
 
-        # Common contractions mapping
+        # Enhanced contractions mapping
         self.contractions_map = {
             "n't": " not", "'re": " are", "'s": " is", "'ll": " will",
             "'ve": " have", "'d": " would", "'m": " am",
@@ -91,12 +93,18 @@ class AcademicTextHumanizer:
             "doesn't": "does not", "isn't": "is not", "aren't": "are not",
             "wasn't": "was not", "weren't": "were not", "haven't": "have not",
             "hasn't": "has not", "hadn't": "had not", "wouldn't": "would not",
-            "shouldn't": "should not", "couldn't": "could not", "mightn't": "might not"
+            "shouldn't": "should not", "couldn't": "could not", "mightn't": "might not",
+            "mustn't": "must not", "shan't": "shall not", "ain't": "am not",
+            "it's": "it is", "that's": "that is", "what's": "what is",
+            "who's": "who is", "where's": "where is", "when's": "when is",
+            "why's": "why is", "how's": "how is", "there's": "there is",
+            "here's": "here is", "everybody's": "everybody is", "everyone's": "everyone is",
+            "nobody's": "nobody is", "someone's": "someone is", "something's": "something is"
         }
 
     def humanize_text(self, text, use_passive=False, use_synonyms=False):
         """
-        Humanize text with memory safety limits and strict input validation.
+        Improved humanization with better transformations and higher probabilities
         """
         # Input validation
         if not text or not isinstance(text, str):
@@ -125,20 +133,20 @@ class AcademicTextHumanizer:
                     
                 current_sentence = sentence
 
-                # 1. Expand contractions
+                # 1. Expand contractions (always applied)
                 current_sentence = self.expand_contractions(current_sentence)
 
-                # 2. Possibly add academic transitions (with lower probability)
+                # 2. Add academic transitions with higher probability
                 if random.random() < self.p_academic_transition:
                     current_sentence = self.add_academic_transitions(current_sentence)
 
-                # 3. Optionally convert to passive (simplified)
+                # 3. Convert to passive if enabled
                 if use_passive and random.random() < self.p_passive:
-                    current_sentence = self.convert_to_passive_simple(current_sentence)
+                    current_sentence = self.convert_to_passive_improved(current_sentence)
 
-                # 4. Optionally replace words with synonyms (simplified)
+                # 4. Replace with synonyms if enabled
                 if use_synonyms and random.random() < self.p_synonym_replacement:
-                    current_sentence = self.replace_with_synonyms_simple(current_sentence)
+                    current_sentence = self.replace_with_synonyms_improved(current_sentence)
 
                 transformed_sentences.append(current_sentence)
 
@@ -181,7 +189,7 @@ class AcademicTextHumanizer:
 
     def expand_contractions(self, sentence):
         """
-        Expand common contractions efficiently.
+        Comprehensive contraction expansion.
         """
         if not sentence:
             return sentence
@@ -207,37 +215,70 @@ class AcademicTextHumanizer:
         transition = random.choice(self.academic_transitions)
         return f"{transition} {sentence}"
 
-    def convert_to_passive_simple(self, sentence):
+    def convert_to_passive_improved(self, sentence):
         """
-        Simplified passive voice conversion using basic pattern matching.
+        Improved passive voice conversion with better pattern matching.
         """
         if not sentence or len(sentence.split()) < 3:
             return sentence
 
         words = sentence.split()
         
-        # Very basic pattern matching for common active structures
+        # Enhanced verb to past participle mapping
+        verb_map = {
+            'uses': 'used', 'use': 'used', 'using': 'used',
+            'creates': 'created', 'create': 'created', 'creating': 'created',
+            'develops': 'developed', 'develop': 'developed', 'developing': 'developed',
+            'implements': 'implemented', 'implement': 'implemented', 'implementing': 'implemented',
+            'builds': 'built', 'build': 'built', 'building': 'built',
+            'makes': 'made', 'make': 'made', 'making': 'made',
+            'takes': 'taken', 'take': 'taken', 'taking': 'taken',
+            'gives': 'given', 'give': 'given', 'giving': 'given',
+            'shows': 'shown', 'show': 'shown', 'showing': 'shown',
+            'sees': 'seen', 'see': 'seen', 'seeing': 'seen',
+            'finds': 'found', 'find': 'found', 'finding': 'found',
+            'provides': 'provided', 'provide': 'provided', 'providing': 'provided',
+            'offers': 'offered', 'offer': 'offered', 'offering': 'offered',
+            'achieves': 'achieved', 'achieve': 'achieved', 'achieving': 'achieved',
+            'obtains': 'obtained', 'obtain': 'obtained', 'obtaining': 'obtained',
+            'produces': 'produced', 'produce': 'produced', 'producing': 'produced',
+            'generates': 'generated', 'generate': 'generated', 'generating': 'generated'
+        }
+        
+        # Handle different sentence structures
         if len(words) >= 3:
-            # Check for simple subject-verb-object pattern
-            if (words[0][0].isupper() and  # Subject likely capitalized
-                words[1].lower() in ['is', 'are', 'was', 'were']):
-                return sentence  # Already passive-like
+            # Pattern: Subject + Verb + Object
+            subject = words[0]
+            verb = words[1]
+            object_words = ' '.join(words[2:])
             
-            # Simple transformation for common patterns
-            if len(words) == 3:
-                # "Subject Verb Object" -> "Object is Verb by Subject"
-                return f"{words[2]} is {words[1]} by {words[0].lower()}"
-            elif len(words) == 4:
-                # Handle simple cases with articles
-                if words[1] in ['a', 'an', 'the']:
-                    return f"{words[2]} {words[3]} is {words[1]} by {words[0].lower()}"
+            # Get past participle
+            past_participle = verb_map.get(verb.lower())
+            if not past_participle:
+                # Try to create past participle for regular verbs
+                if verb.endswith('s'):
+                    past_participle = verb[:-1] + 'ed'
+                elif verb.endswith('ing'):
+                    past_participle = verb[:-3] + 'ed'
+                else:
+                    past_participle = verb + 'ed'
+            
+            # Apply passive transformation
+            if verb.lower() in verb_map or verb.endswith('s') or verb.endswith('ing'):
+                # Handle articles
+                if subject.lower() in ['a', 'an', 'the'] and len(words) > 3:
+                    subject = f"{subject} {words[1]}"
+                    verb = words[2]
+                    object_words = ' '.join(words[3:])
+                    past_participle = verb_map.get(verb.lower(), verb + 'ed')
+                
+                return f"{object_words} is {past_participle} by {subject.lower()}"
         
         return sentence
 
-    def replace_with_synonyms_simple(self, sentence):
+    def replace_with_synonyms_improved(self, sentence):
         """
-        Simplified synonym replacement without heavy models.
-        Focuses on common academic words.
+        Enhanced synonym replacement with comprehensive academic vocabulary.
         """
         if not sentence:
             return sentence
@@ -245,44 +286,69 @@ class AcademicTextHumanizer:
         words = sentence.split()
         new_words = []
         
-        # Common words that benefit from academic synonyms
+        # Comprehensive academic vocabulary mapping
         academic_word_map = {
-            'big': ['substantial', 'considerable', 'significant'],
-            'small': ['minimal', 'modest', 'limited'],
-            'good': ['effective', 'beneficial', 'advantageous'],
-            'bad': ['ineffective', 'detrimental', 'problematic'],
-            'important': ['crucial', 'essential', 'paramount'],
-            'show': ['demonstrate', 'illustrate', 'reveal'],
-            'get': ['obtain', 'acquire', 'secure'],
-            'use': ['utilize', 'employ', 'implement'],
-            'make': ['create', 'produce', 'generate'],
-            'help': ['assist', 'facilitate', 'enable'],
-            'start': ['initiate', 'commence', 'undertake'],
-            'end': ['conclude', 'terminate', 'complete'],
-            'change': ['modify', 'alter', 'transform'],
-            'look': ['examine', 'analyze', 'investigate'],
-            'think': ['consider', 'contemplate', 'deliberate'],
-            'know': ['understand', 'comprehend', 'recognize'],
-            'see': ['observe', 'perceive', 'witness'],
-            'give': ['provide', 'offer', 'supply'],
-            'take': ['accept', 'receive', 'acquire'],
-            'put': ['place', 'position', 'locate'],
-            'keep': ['maintain', 'preserve', 'retain'],
-            'let': ['allow', 'permit', 'enable'],
-            'feel': ['experience', 'perceive', 'sense'],
-            'try': ['attempt', 'endeavor', 'strive'],
-            'work': ['function', 'operate', 'perform'],
-            'need': ['require', 'necessitate', 'demand'],
-            'want': ['desire', 'require', 'seek']
+            # Common verbs
+            'use': ['utilize', 'employ', 'implement', 'apply', 'leverage'],
+            'make': ['create', 'produce', 'generate', 'construct', 'fabricate'],
+            'get': ['obtain', 'acquire', 'secure', 'procure', 'attain'],
+            'give': ['provide', 'offer', 'supply', 'furnish', 'deliver'],
+            'show': ['demonstrate', 'illustrate', 'reveal', 'exhibit', 'manifest'],
+            'help': ['assist', 'facilitate', 'enable', 'support', 'aid'],
+            'start': ['initiate', 'commence', 'begin', 'undertake', 'launch'],
+            'change': ['modify', 'alter', 'transform', 'adjust', 'adapt'],
+            'keep': ['maintain', 'preserve', 'retain', 'sustain', 'uphold'],
+            'put': ['place', 'position', 'locate', 'situate', 'deposit'],
+            'take': ['accept', 'receive', 'acquire', 'adopt', 'appropriate'],
+            'think': ['consider', 'contemplate', 'deliberate', 'reflect', 'ponder'],
+            'know': ['understand', 'comprehend', 'recognize', 'apprehend', 'discern'],
+            'see': ['observe', 'perceive', 'witness', 'discern', 'behold'],
+            'want': ['desire', 'require', 'seek', 'request', 'solicit'],
+            
+            # Adjectives
+            'good': ['effective', 'beneficial', 'advantageous', 'favorable', 'superior'],
+            'bad': ['ineffective', 'detrimental', 'problematic', 'unfavorable', 'deleterious'],
+            'big': ['substantial', 'considerable', 'significant', 'extensive', 'substantive'],
+            'small': ['minimal', 'modest', 'limited', 'negligible', 'insubstantial'],
+            'important': ['crucial', 'essential', 'paramount', 'critical', 'vital'],
+            'different': ['distinct', 'disparate', 'varied', 'diverse', 'heterogeneous'],
+            'new': ['novel', 'innovative', 'recent', 'contemporary', 'modern'],
+            'old': ['traditional', 'conventional', 'established', 'time-honored', 'archaic'],
+            
+            # Nouns
+            'way': ['method', 'approach', 'technique', 'strategy', 'methodology'],
+            'thing': ['aspect', 'element', 'component', 'factor', 'entity'],
+            'stuff': ['material', 'substance', 'content', 'matter', 'composition'],
+            'problem': ['issue', 'challenge', 'difficulty', 'obstacle', 'complication'],
+            'answer': ['solution', 'resolution', 'explanation', 'clarification', 'response'],
+            'job': ['task', 'assignment', 'responsibility', 'duty', 'obligation'],
+            
+            # Academic phrases
+            'a lot of': ['numerous', 'multiple', 'various', 'considerable', 'substantial'],
+            'lots of': ['abundant', 'plentiful', 'copious', 'substantial', 'profuse'],
+            'kind of': ['somewhat', 'rather', 'moderately', 'relatively', 'comparatively'],
+            'sort of': ['somewhat', 'rather', 'moderately', 'relatively', 'comparatively']
         }
         
-        for word in words:
-            # Only process words that are likely to have good synonyms
-            clean_word = word.lower().strip('.,!?;:')
+        i = 0
+        while i < len(words):
+            word = words[i]
+            clean_word = word.lower().strip('.,!?;:"')
             
-            if (len(clean_word) > 3 and 
+            # Check for multi-word phrases first
+            if i < len(words) - 1:
+                two_word = f"{clean_word} {words[i+1].lower().strip('.,!?;:"')}"
+                if two_word in academic_word_map:
+                    synonyms = academic_word_map[two_word]
+                    chosen_synonym = random.choice(synonyms)
+                    new_words.append(chosen_synonym)
+                    i += 2  # Skip next word
+                    continue
+            
+            # Single word replacement
+            if (len(clean_word) > 2 and 
                 clean_word.isalpha() and 
-                random.random() < 0.4 and  # 40% chance per eligible word
+                random.random() < 0.7 and  # High probability for eligible words
                 clean_word in academic_word_map):
                 
                 synonyms = academic_word_map[clean_word]
@@ -295,8 +361,12 @@ class AcademicTextHumanizer:
                 new_words.append(chosen_synonym)
             else:
                 new_words.append(word)
-                
-        return ' '.join(new_words)
+            
+            i += 1
+    
+        # Remove any empty strings and join
+        result = ' '.join([w for w in new_words if w])
+        return result
 
     def _get_simple_synonyms(self, word):
         """
@@ -325,102 +395,6 @@ class AcademicTextHumanizer:
                     
             return list(synonyms) if synonyms else None
             
-        except Exception:
-            return None
-
-    # Original methods kept as fallbacks but with memory optimizations
-    def convert_to_passive(self, sentence):
-        """
-        Original passive conversion (fallback) with memory safety.
-        """
-        if self.nlp is None or len(sentence) > 500:
-            return self.convert_to_passive_simple(sentence)
-            
-        try:
-            doc = self.nlp(sentence)
-            subj_tokens = [t for t in doc if t.dep_ == 'nsubj' and t.head.dep_ == 'ROOT']
-            dobj_tokens = [t for t in doc if t.dep_ == 'dobj']
-
-            if subj_tokens and dobj_tokens:
-                subject = subj_tokens[0]
-                dobj = dobj_tokens[0]
-                verb = subject.head
-                if subject.i < verb.i < dobj.i:
-                    passive_str = f"{dobj.text} {verb.lemma_} by {subject.text}"
-                    original_str = ' '.join(token.text for token in doc)
-                    chunk = f"{subject.text} {verb.text} {dobj.text}"
-                    if chunk in original_str:
-                        return original_str.replace(chunk, passive_str)
-            return sentence
-        except Exception:
-            return self.convert_to_passive_simple(sentence)
-
-    def replace_with_synonyms(self, sentence):
-        """
-        Original synonym replacement (fallback) with WordNet.
-        """
-        if len(sentence) > 1000:  # Skip for very long sentences
-            return sentence
-            
-        try:
-            tokens = word_tokenize(sentence)
-            pos_tags = nltk.pos_tag(tokens)
-
-            new_tokens = []
-            for (word, pos) in pos_tags:
-                if (pos.startswith(('J', 'N', 'V', 'R')) and 
-                    len(word) > 3 and 
-                    word.isalpha() and
-                    wordnet.synsets(word)):
-                    if random.random() < 0.3:  # Lower probability for memory safety
-                        synonyms = self._get_synonyms(word, pos)
-                        if synonyms:
-                            # Use random selection instead of model-based for memory
-                            best_synonym = random.choice(synonyms)
-                            new_tokens.append(best_synonym if best_synonym else word)
-                        else:
-                            new_tokens.append(word)
-                    else:
-                        new_tokens.append(word)
-                else:
-                    new_tokens.append(word)
-
-            return ' '.join(new_tokens)
-        except Exception:
-            return self.replace_with_synonyms_simple(sentence)
-
-    def _get_synonyms(self, word, pos):
-        """
-        Get synonyms with POS filtering and memory limits.
-        """
-        if len(word) <= 3:
-            return None
-            
-        wn_pos = None
-        if pos.startswith('J'):
-            wn_pos = wordnet.ADJ
-        elif pos.startswith('N'):
-            wn_pos = wordnet.NOUN
-        elif pos.startswith('R'):
-            wn_pos = wordnet.ADV
-        elif pos.startswith('V'):
-            wn_pos = wordnet.VERB
-
-        synonyms = set()
-        try:
-            for syn in wordnet.synsets(word, pos=wn_pos):
-                for lemma in syn.lemmas():
-                    lemma_name = lemma.name().replace('_', ' ')
-                    if (lemma_name.lower() != word.lower() and
-                        len(lemma_name.split()) == 1 and
-                        lemma_name.isalpha()):
-                        synonyms.add(lemma_name)
-                        # Strict memory limit
-                        if len(synonyms) >= 5:
-                            break
-                if len(synonyms) >= 5:
-                    break
-            return list(synonyms)
         except Exception:
             return None
 
