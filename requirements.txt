@@ -1,9 +1,6 @@
-gradio
-numpy
-nltk
-spacy
-pandas
-transformers
-torch
-sentence-transformers
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+nltk==3.8.1
+spacy==3.7.2
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.0/en_core_web_sm-3.7.0-py3-none-any.whl
