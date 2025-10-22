@@ -1,21 +1,31 @@
 import ssl
 import random
 import warnings
-import re
+import os
 
 import nltk
 import spacy
 from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.corpus import wordnet
-from sentence_transformers import SentenceTransformer, util
 
+# Disable unnecessary warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
-NLP_GLOBAL = None  # Will be loaded once
+# Global NLP model with memory optimization
+try:
+    # Load spaCy with minimal components to save memory
+    NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["parser", "ner", "textcat"])
+    print("✅ spaCy model loaded successfully")
+except OSError:
+    # Fallback for environments without spacy model
+    NLP_GLOBAL = None
+    print("⚠️ spaCy model not available, using fallback mode")
 
 def download_nltk_resources():
     """
     Download required NLTK resources if not already installed.
+    Optimized for serverless environments.
     """
     try:
         _create_unverified_https_context = ssl._create_unverified_context
@@ -24,26 +34,22 @@ def download_nltk_resources():
     else:
         ssl._create_default_https_context = _create_unverified_https_context
 
-    resources = ['punkt', 'averaged_perceptron_tagger', 'punkt_tab', 'wordnet', 'averaged_perceptron_tagger_eng']
+    # Minimal required resources
+    resources = ['punkt', 'averaged_perceptron_tagger', 'wordnet']
     for resource in resources:
         try:
             nltk.download(resource, quiet=True)
         except Exception as e:
-            print(f"Error downloading {resource}: {str(e)}")
-
+            print(f"⚠️ Error downloading {resource}: {str(e)}")
 
 class AcademicTextHumanizer:
     """
-    Transforms text into a more formal (academic) style:
-      - Expands contractions
-      - Adds academic transitions
-      - Optionally converts some sentences to passive voice
-      - Optionally replaces words with synonyms for more formality
+    Lightweight text humanizer optimized for serverless environments.
+    No heavy dependencies like sentence-transformers.
     """
 
     def __init__(
         self,
-        model_name='paraphrase-MiniLM-L6-v2',
         p_passive=0.2,
         p_synonym_replacement=0.3,
         p_academic_transition=0.3,
@@ -52,42 +58,17 @@ class AcademicTextHumanizer:
         if seed is not None:
             random.seed(seed)
 
-        # Load spacy model once
-        global NLP_GLOBAL
-        if NLP_GLOBAL is None:
-            try:
-                NLP_GLOBAL = spacy.load("en_core_web_sm")
-            except Exception as e:
-                print(f"Failed to load spacy model: {e}")
-                NLP_GLOBAL = None
-        
-        self.nlp = NLP_GLOBAL
-        
-        # Model loading with fallbacks
-        model_options = [
-            'all-MiniLM-L6-v2',
-            'sentence-transformers/all-MiniLM-L6-v2', 
-            'paraphrase-MiniLM-L6-v2',
-            'sentence-transformers/paraphrase-MiniLM-L6-v2'
-        ]
-        
-        self.model = None
-        for model_name_option in model_options:
-            try:
-                self.model = SentenceTransformer(model_name_option)
-                print(f"✅ Successfully loaded model: {model_name_option}")
-                break
-            except Exception as e:
-                print(f"❌ Failed to load {model_name_option}: {str(e)}")
-                continue
-        
-        if self.model is None:
-            print("⚠️ Using fallback mode without sentence transformers")
+        # Load spaCy with minimal components for memory efficiency
+        try:
+            self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner", "textcat"])
+        except OSError:
+            self.nlp = None
+            print("⚠️ spaCy model not available - using basic text processing")
 
-        # Transformation probabilities
-        self.p_passive = p_passive
-        self.p_synonym_replacement = p_synonym_replacement
-        self.p_academic_transition = p_academic_transition
+        # Conservative probabilities for serverless
+        self.p_passive = min(p_passive, 0.3)  # Cap at 30%
+        self.p_synonym_replacement = min(p_synonym_replacement, 0.3)
+        self.p_academic_transition = min(p_academic_transition, 0.3)
 
         # Common academic transitions
         self.academic_transitions = [
@@ -95,128 +76,228 @@ class AcademicTextHumanizer:
             "Therefore,", "Consequently,", "Nonetheless,", "Nevertheless,"
         ]
 
+        # Common contractions mapping
+        self.contractions_map = {
+            "n't": " not", "'re": " are", "'s": " is", "'ll": " will",
+            "'ve": " have", "'d": " would", "'m": " am",
+            "can't": "cannot", "won't": "will not", "don't": "do not",
+            "doesn't": "does not", "isn't": "is not", "aren't": "are not",
+            "wasn't": "was not", "weren't": "were not", "haven't": "have not",
+            "hasn't": "has not", "hadn't": "had not", "wouldn't": "would not",
+            "shouldn't": "should not", "couldn't": "could not", "mightn't": "might not"
+        }
+
     def humanize_text(self, text, use_passive=False, use_synonyms=False):
         """
-        Main method to humanize text with safety limits
+        Humanize text with memory safety limits and strict input validation.
         """
-        if not text or not text.strip():
-            return ""
-        
-        # Safety check - prevent processing too much text
-        if len(text) > 10000:
-            text = text[:10000]
+        # Input validation
+        if not text or not isinstance(text, str):
+            return "Error: Invalid input text"
+            
+        text = text.strip()
+        if not text:
+            return "Please enter some text to process."
+
+        # Strict length limits for serverless
+        if len(text) > 10000:  # 10K character limit
+            return "Error: Input text too long for processing (max 10,000 characters)"
         
         try:
-            # Use spacy for sentence splitting if available, otherwise use NLTK
-            if self.nlp:
-                doc = self.nlp(text)
-                sentences = [sent.text.strip() for sent in doc.sents]
+            # Use basic sentence splitting for memory efficiency
+            if self.nlp is None:
+                sentences = [s.strip() for s in sent_tokenize(text) if s.strip()]
             else:
-                sentences = sent_tokenize(text)
-            
-            # Limit number of sentences to prevent memory issues
-            if len(sentences) > 100:
-                sentences = sentences[:100]
-            
+                # Use spaCy for better sentence segmentation if available
+                doc = self.nlp(text)
+                sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+
+            if not sentences:
+                return "No valid sentences found to process."
+
             transformed_sentences = []
             
-            for sent in sentences:
-                if not sent or len(sent.strip()) == 0:
+            for sentence in sentences:
+                if not sentence:
                     continue
-                
-                sentence_str = sent.strip()
-                
-                # Limit individual sentence length
-                if len(sentence_str) > 500:
-                    sentence_str = sentence_str[:500]
-
-                try:
-                    # 1. Expand contractions
-                    sentence_str = self.expand_contractions(sentence_str)
-
-                    # 2. Possibly add academic transitions (not on every sentence)
-                    if random.random() < self.p_academic_transition:
-                        sentence_str = self.add_academic_transitions(sentence_str)
-
-                    # 3. Optionally convert to passive
-                    if use_passive and random.random() < self.p_passive:
-                        sentence_str = self.convert_to_passive(sentence_str)
-
-                    # 4. Optionally replace words with synonyms
-                    if use_synonyms and random.random() < self.p_synonym_replacement:
-                        sentence_str = self.replace_with_synonyms(sentence_str)
-
-                    transformed_sentences.append(sentence_str)
                     
-                except Exception as e:
-                    # If any transformation fails, use original sentence
-                    print(f"Error transforming sentence: {e}")
-                    transformed_sentences.append(sent.strip())
+                current_sentence = sentence
 
-            # Join with proper spacing
+                # 1. Expand contractions
+                current_sentence = self.expand_contractions(current_sentence)
+
+                # 2. Possibly add academic transitions (with lower probability)
+                if random.random() < self.p_academic_transition:
+                    current_sentence = self.add_academic_transitions(current_sentence)
+
+                # 3. Optionally convert to passive (simplified)
+                if use_passive and random.random() < self.p_passive:
+                    current_sentence = self.convert_to_passive_simple(current_sentence)
+
+                # 4. Optionally replace words with synonyms (simplified)
+                if use_synonyms and random.random() < self.p_synonym_replacement:
+                    current_sentence = self.replace_with_synonyms_simple(current_sentence)
+
+                transformed_sentences.append(current_sentence)
+
             result = ' '.join(transformed_sentences)
             
-            # Final safety check on output size
-            if len(result) > 20000:
-                result = result[:20000]
-            
+            # Final safety check
+            if len(result) > 15000:  # Slightly larger to account for expansions
+                return "Error: Output too large after processing"
+                
             return result
             
         except Exception as e:
-            print(f"Error in humanize_text: {e}")
-            return text[:10000]  # Return truncated original on error
+            return f"Error processing text: {str(e)}"
 
     def expand_contractions(self, sentence):
-        """Expand common English contractions"""
-        contraction_map = {
-            "n't": " not",
-            "'re": " are",
-            "'s": " is",
-            "'ll": " will",
-            "'ve": " have",
-            "'d": " would",
-            "'m": " am"
-        }
-        
-        try:
-            tokens = word_tokenize(sentence)
-            expanded_tokens = []
-            
-            for token in tokens:
-                lower_token = token.lower()
-                replaced = False
-                
-                for contraction, expansion in contraction_map.items():
-                    if contraction in lower_token and lower_token.endswith(contraction):
-                        new_token = lower_token.replace(contraction, expansion)
-                        if token and token[0].isupper():
-                            new_token = new_token.capitalize()
-                        expanded_tokens.append(new_token)
-                        replaced = True
-                        break
-                
-                if not replaced:
-                    expanded_tokens.append(token)
-
-            return ' '.join(expanded_tokens)
-        except Exception as e:
-            print(f"Error expanding contractions: {e}")
+        """
+        Expand common contractions efficiently.
+        """
+        if not sentence:
             return sentence
+            
+        result = sentence
+        # Sort by length descending to handle longer contractions first
+        contractions_sorted = sorted(self.contractions_map.items(), 
+                                   key=lambda x: len(x[0]), 
+                                   reverse=True)
+        
+        for contraction, expansion in contractions_sorted:
+            result = result.replace(contraction, expansion)
+            
+        return result
 
     def add_academic_transitions(self, sentence):
-        """Add academic transition words to sentences"""
-        try:
-            transition = random.choice(self.academic_transitions)
-            return f"{transition} {sentence}"
-        except Exception as e:
-            print(f"Error adding transitions: {e}")
+        """
+        Add academic transition words at the beginning of sentences.
+        """
+        if not sentence:
+            return sentence
+            
+        transition = random.choice(self.academic_transitions)
+        return f"{transition} {sentence}"
+
+    def convert_to_passive_simple(self, sentence):
+        """
+        Simplified passive voice conversion using basic pattern matching.
+        """
+        if not sentence or len(sentence.split()) < 3:
             return sentence
 
-    def convert_to_passive(self, sentence):
-        """Convert active voice to passive voice"""
-        if not self.nlp:
-            return sentence
+        words = sentence.split()
         
+        # Very basic pattern matching for common active structures
+        if len(words) >= 3:
+            # Check for simple subject-verb-object pattern
+            if (words[0][0].isupper() and  # Subject likely capitalized
+                words[1].lower() in ['is', 'are', 'was', 'were']):
+                return sentence  # Already passive-like
+            
+            # Simple transformation for common patterns
+            if len(words) == 3:
+                # "Subject Verb Object" -> "Object is Verb by Subject"
+                return f"{words[2]} is {words[1]} by {words[0].lower()}"
+            elif len(words) == 4:
+                # Handle simple cases with articles
+                if words[1] in ['a', 'an', 'the']:
+                    return f"{words[2]} {words[3]} is {words[1]} by {words[0].lower()}"
+        
+        return sentence
+
+    def replace_with_synonyms_simple(self, sentence):
+        """
+        Simplified synonym replacement without heavy models.
+        Focuses on common academic words.
+        """
+        if not sentence:
+            return sentence
+            
+        words = sentence.split()
+        new_words = []
+        
+        # Common words that benefit from academic synonyms
+        academic_word_map = {
+            'big': ['substantial', 'considerable', 'significant'],
+            'small': ['minimal', 'modest', 'limited'],
+            'good': ['effective', 'beneficial', 'advantageous'],
+            'bad': ['ineffective', 'detrimental', 'problematic'],
+            'important': ['crucial', 'essential', 'paramount'],
+            'show': ['demonstrate', 'illustrate', 'reveal'],
+            'get': ['obtain', 'acquire', 'secure'],
+            'use': ['utilize', 'employ', 'implement'],
+            'make': ['create', 'produce', 'generate'],
+            'help': ['assist', 'facilitate', 'enable'],
+            'start': ['initiate', 'commence', 'undertake'],
+            'end': ['conclude', 'terminate', 'complete'],
+            'change': ['modify', 'alter', 'transform'],
+            'look': ['examine', 'analyze', 'investigate'],
+            'think': ['consider', 'contemplate', 'deliberate'],
+            'know': ['understand', 'comprehend', 'recognize'],
+            'see': ['observe', 'perceive', 'witness']
+        }
+        
+        for word in words:
+            # Only process words that are likely to have good synonyms
+            clean_word = word.lower().strip('.,!?;:')
+            
+            if (len(clean_word) > 3 and 
+                clean_word.isalpha() and 
+                random.random() < 0.4 and  # 40% chance per eligible word
+                clean_word in academic_word_map):
+                
+                synonyms = academic_word_map[clean_word]
+                chosen_synonym = random.choice(synonyms)
+                
+                # Preserve capitalization
+                if word[0].isupper():
+                    chosen_synonym = chosen_synonym.capitalize()
+                    
+                new_words.append(chosen_synonym)
+            else:
+                new_words.append(word)
+                
+        return ' '.join(new_words)
+
+    def _get_simple_synonyms(self, word):
+        """
+        Get synonyms using WordNet with memory limits.
+        Fallback method if the static map doesn't have the word.
+        """
+        if not word or len(word) <= 3:
+            return None
+            
+        try:
+            synonyms = set()
+            for syn in wordnet.synsets(word):
+                for lemma in syn.lemmas():
+                    lemma_name = lemma.name().replace('_', ' ')
+                    if (lemma_name.lower() != word.lower() and 
+                        len(lemma_name.split()) == 1 and  # Single word only
+                        lemma_name.isalpha() and
+                        len(lemma_name) > 3):  # Avoid very short synonyms
+                        synonyms.add(lemma_name)
+                        
+                        # Limit to 3 synonyms to save memory
+                        if len(synonyms) >= 3:
+                            break
+                if len(synonyms) >= 3:
+                    break
+                    
+            return list(synonyms) if synonyms else None
+            
+        except Exception:
+            return None
+
+    # Original methods kept as fallbacks but with memory optimizations
+    def convert_to_passive(self, sentence):
+        """
+        Original passive conversion (fallback) with memory safety.
+        """
+        if self.nlp is None or len(sentence) > 500:
+            return self.convert_to_passive_simple(sentence)
+            
         try:
             doc = self.nlp(sentence)
             subj_tokens = [t for t in doc if t.dep_ == 'nsubj' and t.head.dep_ == 'ROOT']
@@ -226,115 +307,84 @@ class AcademicTextHumanizer:
                 subject = subj_tokens[0]
                 dobj = dobj_tokens[0]
                 verb = subject.head
-                
                 if subject.i < verb.i < dobj.i:
-                    # Create passive construction
-                    passive_str = f"{dobj.text} was {verb.lemma_}ed by {subject.text}"
+                    passive_str = f"{dobj.text} {verb.lemma_} by {subject.text}"
                     original_str = ' '.join(token.text for token in doc)
                     chunk = f"{subject.text} {verb.text} {dobj.text}"
-                    
                     if chunk in original_str:
-                        sentence = original_str.replace(chunk, passive_str, 1)  # Only replace first occurrence
-            
+                        return original_str.replace(chunk, passive_str)
             return sentence
-        except Exception as e:
-            print(f"Error converting to passive: {e}")
-            return sentence
+        except Exception:
+            return self.convert_to_passive_simple(sentence)
 
     def replace_with_synonyms(self, sentence):
-        """Replace words with synonyms for formality"""
+        """
+        Original synonym replacement (fallback) with WordNet.
+        """
+        if len(sentence) > 1000:  # Skip for very long sentences
+            return sentence
+            
         try:
             tokens = word_tokenize(sentence)
-            
-            # Limit tokens to prevent excessive processing
-            if len(tokens) > 100:
-                tokens = tokens[:100]
-            
             pos_tags = nltk.pos_tag(tokens)
+
             new_tokens = []
-            
             for (word, pos) in pos_tags:
-                # Only process certain POS tags and limit synonym lookups
-                if pos.startswith(('J', 'N', 'V', 'R')) and len(word) > 3:
-                    try:
-                        synsets = wordnet.synsets(word)
-                        if synsets and random.random() < 0.5:
-                            synonyms = self._get_synonyms(word, pos)
-                            if synonyms:
-                                best_synonym = self._select_closest_synonym(word, synonyms)
-                                new_tokens.append(best_synonym if best_synonym else word)
-                            else:
-                                new_tokens.append(word)
+                if (pos.startswith(('J', 'N', 'V', 'R')) and 
+                    len(word) > 3 and 
+                    word.isalpha() and
+                    wordnet.synsets(word)):
+                    if random.random() < 0.3:  # Lower probability for memory safety
+                        synonyms = self._get_synonyms(word, pos)
+                        if synonyms:
+                            # Use random selection instead of model-based for memory
+                            best_synonym = random.choice(synonyms)
+                            new_tokens.append(best_synonym if best_synonym else word)
                         else:
                             new_tokens.append(word)
-                    except Exception:
+                    else:
                         new_tokens.append(word)
                 else:
                     new_tokens.append(word)
 
             return ' '.join(new_tokens)
-        except Exception as e:
-            print(f"Error replacing synonyms: {e}")
-            return sentence
+        except Exception:
+            return self.replace_with_synonyms_simple(sentence)
 
     def _get_synonyms(self, word, pos):
-        """Get synonyms for a word based on POS tag"""
-        try:
-            wn_pos = None
-            if pos.startswith('J'):
-                wn_pos = wordnet.ADJ
-            elif pos.startswith('N'):
-                wn_pos = wordnet.NOUN
-            elif pos.startswith('R'):
-                wn_pos = wordnet.ADV
-            elif pos.startswith('V'):
-                wn_pos = wordnet.VERB
-
-            synonyms = set()
-            synsets = wordnet.synsets(word, pos=wn_pos)
+        """
+        Get synonyms with POS filtering and memory limits.
+        """
+        if len(word) <= 3:
+            return None
             
-            # Limit number of synsets to check
-            for syn in synsets[:5]:  # Only check first 5 synsets
-                for lemma in syn.lemmas()[:3]:  # Only check first 3 lemmas
+        wn_pos = None
+        if pos.startswith('J'):
+            wn_pos = wordnet.ADJ
+        elif pos.startswith('N'):
+            wn_pos = wordnet.NOUN
+        elif pos.startswith('R'):
+            wn_pos = wordnet.ADV
+        elif pos.startswith('V'):
+            wn_pos = wordnet.VERB
+
+        synonyms = set()
+        try:
+            for syn in wordnet.synsets(word, pos=wn_pos):
+                for lemma in syn.lemmas():
                     lemma_name = lemma.name().replace('_', ' ')
-                    if lemma_name.lower() != word.lower():
+                    if (lemma_name.lower() != word.lower() and
+                        len(lemma_name.split()) == 1 and
+                        lemma_name.isalpha()):
                         synonyms.add(lemma_name)
-                    
-                    # Limit total synonyms
-                    if len(synonyms) >= 10:
-                        break
-                if len(synonyms) >= 10:
+                        # Strict memory limit
+                        if len(synonyms) >= 5:
+                            break
+                if len(synonyms) >= 5:
                     break
-            
-            return list(synonyms)[:10]  # Return max 10 synonyms
-        except Exception as e:
-            print(f"Error getting synonyms: {e}")
-            return []
+            return list(synonyms)
+        except Exception:
+            return None
 
-    def _select_closest_synonym(self, original_word, synonyms):
-        """Select the most semantically similar synonym"""
-        if not synonyms:
-            return None
-        
-        # If model failed to load, use random selection
-        if self.model is None:
-            return random.choice(synonyms) if synonyms else None
-        
-        try:
-            # Limit synonyms to check
-            synonyms_to_check = synonyms[:5]
-            
-            original_emb = self.model.encode(original_word, convert_to_tensor=True)
-            synonym_embs = self.model.encode(synonyms_to_check, convert_to_tensor=True)
-            cos_scores = util.cos_sim(original_emb, synonym_embs)[0]
-            max_score_index = cos_scores.argmax().item()
-            max_score = cos_scores[max_score_index].item()
-            
-            # Only use synonym if similarity is high enough
-            if max_score >= 0.5:
-                return synonyms_to_check[max_score_index]
-            return None
-        except Exception as e:
-            # Fallback to random selection if encoding fails
-            print(f"Model encoding failed, using random synonym: {e}")
-            return random.choice(synonyms) if synonyms else None
+# Initialize NLTK resources when module is imported
+download_nltk_resources()
