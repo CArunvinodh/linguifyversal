@@ -5,7 +5,14 @@ import nltk
 import spacy
 from nltk.tokenize import word_tokenize
 from nltk.corpus import wordnet
-from sentence_transformers import SentenceTransformer, util
+try:
+    from sentence_transformers import SentenceTransformer
+    self.model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+except Exception as e:
+    print("⚠️ Model load failed:", e)
+    self.model = None
+if self.model is None:
+    return random.choice(synonyms)
 
 # -----------------------------
 # Setup and Warnings Handling
@@ -210,3 +217,4 @@ if __name__ == "__main__":
     humanizer = AcademicTextHumanizer(seed=42)
     result = humanizer.humanize_text(sample_text, use_passive=True, use_synonyms=True)
     print("\n🔹 Humanized Output:\n", result)
+
