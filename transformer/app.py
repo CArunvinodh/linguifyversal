@@ -6,11 +6,10 @@ import spacy
 from nltk.tokenize import word_tokenize
 from nltk.corpus import wordnet
 
-# Disable warnings for cleaner serverless logs
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # ------------------------------
-# Initialize spaCy + NLTK
+# Initialize spaCy & NLTK
 # ------------------------------
 try:
     NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
@@ -20,7 +19,7 @@ except OSError:
     NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
 
 def download_nltk_resources():
-    """Ensure required NLTK data is available"""
+    """Ensure required NLTK data is available (for serverless)."""
     try:
         _create_unverified_https_context = ssl._create_unverified_context
     except AttributeError:
@@ -28,15 +27,11 @@ def download_nltk_resources():
     else:
         ssl._create_default_https_context = _create_unverified_https_context
 
-    resources = [
-        'punkt', 'wordnet', 'averaged_perceptron_tagger', 
-        'averaged_perceptron_tagger_eng', 'omw-1.4'
-    ]
-    for resource in resources:
+    for r in ["punkt", "wordnet", "averaged_perceptron_tagger", "averaged_perceptron_tagger_eng", "omw-1.4"]:
         try:
-            nltk.download(resource, quiet=True)
+            nltk.download(r, quiet=True)
         except Exception as e:
-            print(f"⚠️ Error downloading {resource}: {str(e)}")
+            print(f"⚠️ Error downloading {r}: {e}")
 
 download_nltk_resources()
 
@@ -46,8 +41,8 @@ download_nltk_resources()
 # ------------------------------
 class AcademicTextHumanizer:
     """
-    Lightweight serverless-safe academic text humanizer.
-    Produces formal, natural-sounding text suitable for AI detection bypass.
+    Serverless-friendly academic text rewriter.
+    Adds natural rhythm, transitions, passive phrasing, and lexical variation.
     """
 
     def __init__(
@@ -55,6 +50,7 @@ class AcademicTextHumanizer:
         p_passive=0.3,
         p_synonym_replacement=0.5,
         p_academic_transition=0.4,
+        p_rhythm_variation=0.5,
         seed=None
     ):
         if seed is not None:
@@ -64,30 +60,36 @@ class AcademicTextHumanizer:
         self.p_passive = p_passive
         self.p_synonym_replacement = p_synonym_replacement
         self.p_academic_transition = p_academic_transition
+        self.p_rhythm_variation = p_rhythm_variation
 
-        # Smooth academic transitions
         self.academic_transitions = [
-            "Moreover,", "Furthermore,", "In addition,",
-            "Consequently,", "Therefore,", "Hence,",
-            "Notably,", "As a result,", "Importantly,",
-            "In this context,", "On the other hand,"
+            "Moreover,", "Furthermore,", "In addition,", "Consequently,", "Therefore,",
+            "Hence,", "Notably,", "Importantly,", "As a result,", "In this regard,"
         ]
 
-        # Contraction map
+        self.rhythm_patterns = [
+            # adds commas, semicolons, and clause pauses
+            lambda s: s.replace(".", ", and").replace(";", ",") + ".",
+            lambda s: s + " Interestingly, this trend continues.",
+            lambda s: s.replace(",", ";").replace(" and ", ", while "),
+            lambda s: s + " This, in turn, emphasizes the broader implication.",
+            lambda s: "To elaborate, " + s[0].lower() + s[1:] if len(s) > 10 else s
+        ]
+
         self.contraction_map = {
             "n't": " not", "'re": " are", "'s": " is", "'ll": " will",
             "'ve": " have", "'d": " would", "'m": " am",
         }
 
     # ------------------------------
-    # Core Function
+    # Main entry
     # ------------------------------
     def humanize_text(self, text, use_passive=False, use_synonyms=False):
         if not text or not isinstance(text, str):
             return "Invalid input text"
 
         doc = self.nlp(text)
-        transformed_sentences = []
+        transformed = []
 
         for sent in doc.sents:
             sentence = sent.text.strip()
@@ -97,81 +99,65 @@ class AcademicTextHumanizer:
             # 1️⃣ Expand contractions
             sentence = self.expand_contractions(sentence)
 
-            # 2️⃣ Randomly add academic transitions
-            if random.random() < self.p_academic_transition and not sentence.startswith(tuple(self.academic_transitions)):
+            # 2️⃣ Add transition
+            if random.random() < self.p_academic_transition:
                 sentence = self.add_academic_transition(sentence)
 
-            # 3️⃣ Optionally convert some sentences to passive style
+            # 3️⃣ Passive structure
             if use_passive and random.random() < self.p_passive:
                 sentence = self.convert_to_passive(sentence)
 
-            # 4️⃣ Optionally replace some words with academic synonyms
+            # 4️⃣ Synonym replacements
             if use_synonyms and random.random() < self.p_synonym_replacement:
                 sentence = self.replace_with_synonyms(sentence)
 
-            transformed_sentences.append(sentence)
+            # 5️⃣ Sentence rhythm & variation
+            if random.random() < self.p_rhythm_variation:
+                sentence = self.vary_sentence_rhythm(sentence)
 
-        return " ".join(transformed_sentences)
+            transformed.append(sentence)
+
+        # Smooth join to simulate human flow
+        text_out = " ".join(transformed)
+        return self._smooth_join(text_out)
 
     # ------------------------------
-    # Contraction Expansion
+    # Helper functions
     # ------------------------------
     def expand_contractions(self, sentence):
         tokens = word_tokenize(sentence)
-        expanded_tokens = []
+        expanded = []
         for token in tokens:
-            lower_token = token.lower()
-            replaced = False
-            for contraction, expansion in self.contraction_map.items():
-                if contraction in lower_token and lower_token.endswith(contraction):
-                    new_token = lower_token.replace(contraction, expansion)
-                    if token[0].isupper():
-                        new_token = new_token.capitalize()
-                    expanded_tokens.append(new_token)
-                    replaced = True
+            lower = token.lower()
+            for contr, exp in self.contraction_map.items():
+                if lower.endswith(contr):
+                    token = lower.replace(contr, exp)
                     break
-            if not replaced:
-                expanded_tokens.append(token)
-        return " ".join(expanded_tokens)
+            expanded.append(token)
+        return " ".join(expanded)
 
-    # ------------------------------
-    # Academic Transitions
-    # ------------------------------
     def add_academic_transition(self, sentence):
-        transition = random.choice(self.academic_transitions)
-        return f"{transition} {sentence}"
+        return f"{random.choice(self.academic_transitions)} {sentence}"
 
-    # ------------------------------
-    # Passive Conversion (simple heuristic)
-    # ------------------------------
     def convert_to_passive(self, sentence):
         doc = self.nlp(sentence)
         subj = [t for t in doc if t.dep_ == "nsubj" and t.head.pos_ == "VERB"]
         dobj = [t for t in doc if t.dep_ == "dobj"]
         if subj and dobj:
-            subject = subj[0]
-            obj = dobj[0]
-            verb = subject.head
-            passive_form = f"{obj.text} is {verb.lemma_} by {subject.text}"
-            return sentence.replace(f"{subject.text} {verb.text} {obj.text}", passive_form)
-        # fallback to a natural passive-like extension
-        if random.random() < 0.5:
-            return sentence + " This is generally acknowledged in academic contexts."
-        return sentence
+            s, o, v = subj[0], dobj[0], subj[0].head
+            passive = f"{o.text} is {v.lemma_} by {s.text}"
+            return sentence.replace(f"{s.text} {v.text} {o.text}", passive)
+        return sentence + " This observation is frequently acknowledged in studies."
 
-    # ------------------------------
-    # Synonym Replacement
-    # ------------------------------
     def replace_with_synonyms(self, sentence):
         tokens = word_tokenize(sentence)
         pos_tags = nltk.pos_tag(tokens)
         new_tokens = []
-
-        for (word, pos) in pos_tags:
-            clean_word = word.strip('.,!?;:"').lower()
-            if pos.startswith(("J", "N", "V", "R")) and len(clean_word) > 3 and wordnet.synsets(clean_word):
+        for word, pos in pos_tags:
+            lw = word.lower()
+            if pos.startswith(("J", "N", "V", "R")) and len(lw) > 3 and wordnet.synsets(lw):
                 if random.random() < 0.5:
-                    synonyms = self._get_simple_synonyms(clean_word, pos)
+                    synonyms = self._get_synonyms(lw, pos)
                     if synonyms:
                         chosen = random.choice(synonyms)
                         if word[0].isupper():
@@ -181,7 +167,7 @@ class AcademicTextHumanizer:
             new_tokens.append(word)
         return " ".join(new_tokens)
 
-    def _get_simple_synonyms(self, word, pos):
+    def _get_synonyms(self, word, pos):
         wn_pos = None
         if pos.startswith("J"):
             wn_pos = wordnet.ADJ
@@ -192,24 +178,38 @@ class AcademicTextHumanizer:
         elif pos.startswith("V"):
             wn_pos = wordnet.VERB
 
-        synonyms = set()
+        syns = set()
         for syn in wordnet.synsets(word, pos=wn_pos):
             for lemma in syn.lemmas():
-                name = lemma.name().replace("_", " ")
-                if name.lower() != word.lower() and len(name) > 3:
-                    synonyms.add(name)
-                    if len(synonyms) >= 5:
+                n = lemma.name().replace("_", " ")
+                if n.lower() != word.lower() and 3 < len(n) < 14:
+                    syns.add(n)
+                    if len(syns) >= 5:
                         break
-            if len(synonyms) >= 5:
+            if len(syns) >= 5:
                 break
-        return list(synonyms)
+        return list(syns)
+
+    def vary_sentence_rhythm(self, sentence):
+        func = random.choice(self.rhythm_patterns)
+        try:
+            return func(sentence)
+        except Exception:
+            return sentence
+
+    def _smooth_join(self, text):
+        # Natural flow: random comma insertion, minor casing tweaks
+        text = text.replace(" .", ".").replace(" ,", ",")
+        if random.random() < 0.3:
+            text = text.replace(". ", "; ").replace(";", ",")
+        return text
 
 
 # ------------------------------
-# Example Test Run
+# Example Test
 # ------------------------------
 if __name__ == "__main__":
-    text = """Artificial intelligence is transforming industries. 
-    Researchers use various algorithms to enhance learning efficiency."""
+    sample = """Artificial intelligence is transforming industries. 
+    Researchers use algorithms to enhance efficiency and accuracy in predictive tasks."""
     humanizer = AcademicTextHumanizer()
-    print(humanizer.humanize_text(text, use_passive=True, use_synonyms=True))
+    print(humanizer.humanize_text(sample, use_passive=True, use_synonyms=True))
