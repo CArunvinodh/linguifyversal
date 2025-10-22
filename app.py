@@ -1,570 +1,428 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+import ssl
 import random
-import re
+import warnings
+import os
 
-# Initialize FastAPI app
-app = FastAPI(title="Linguify")
+import nltk
+import spacy
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import wordnet
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Disable unnecessary warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
+# Global NLP model with memory optimization
+try:
+    # Load spaCy with sentencizer for sentence boundary detection
+    NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
+    # Add sentencizer to handle sentence boundaries
+    if "sentencizer" not in NLP_GLOBAL.pipe_names:
+        NLP_GLOBAL.add_pipe("sentencizer")
+    print("✅ spaCy model loaded successfully with sentencizer")
+except OSError:
+    # Fallback for environments without spacy model
+    NLP_GLOBAL = None
+    print("⚠️ spaCy model not available, using fallback mode")
 
-class MicroAcademicHumanizer:
-    """Ultra-lightweight text humanizer for Vercel / AWS Lambda."""
-    
+def download_nltk_resources():
+    """
+    Download required NLTK resources if not already installed.
+    Optimized for serverless environments.
+    """
+    try:
+        _create_unverified_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
+
+    # Minimal required resources
+    resources = ['punkt', 'averaged_perceptron_tagger', 'wordnet']
+    for resource in resources:
+        try:
+            nltk.download(resource, quiet=True)
+        except Exception as e:
+            print(f"⚠️ Error downloading {resource}: {str(e)}")
+
+class AcademicTextHumanizer:
+    """
+    Lightweight text humanizer optimized for serverless environments.
+    No heavy dependencies like sentence-transformers.
+    """
+
     def __init__(
         self,
-        p_synonym=0.4,
-        p_transition=0.3,
-        p_rhythm=0.5,
+        p_passive=0.2,
+        p_synonym_replacement=0.3,
+        p_academic_transition=0.3,
         seed=None
     ):
         if seed is not None:
             random.seed(seed)
-        self.p_synonym = p_synonym
-        self.p_transition = p_transition
-        self.p_rhythm = p_rhythm
-        
-        # Transitions and rhythm patterns
-        self.transitions = [
-            "Moreover,", "Furthermore,", "Consequently,", "Therefore,",
-            "Hence,", "In addition,", "Notably,", "Importantly,"
+
+        # Load spaCy with sentencizer for sentence boundary detection
+        try:
+            self.nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
+            # Add sentencizer to handle sentence boundaries
+            if "sentencizer" not in self.nlp.pipe_names:
+                self.nlp.add_pipe("sentencizer")
+            print("✅ AcademicTextHumanizer: spaCy loaded with sentencizer")
+        except OSError:
+            self.nlp = None
+            print("⚠️ AcademicTextHumanizer: spaCy not available - using basic text processing")
+
+        # Conservative probabilities for serverless
+        self.p_passive = min(p_passive, 0.3)  # Cap at 30%
+        self.p_synonym_replacement = min(p_synonym_replacement, 0.3)
+        self.p_academic_transition = min(p_academic_transition, 0.3)
+
+        # Common academic transitions
+        self.academic_transitions = [
+            "Moreover,", "Additionally,", "Furthermore,", "Hence,", 
+            "Therefore,", "Consequently,", "Nonetheless,", "Nevertheless,"
         ]
-        
-        self.rhythm_patterns = [
-            lambda s: s + " This highlights a broader implication.",
-            lambda s: "To elaborate, " + s[0].lower() + s[1:] if len(s) > 10 else s,
-            lambda s: s.replace(",", ";").replace(" and ", ", while "),
-            lambda s: s.replace(".", ", and").rstrip(",") + ".",
-        ]
-        
-        # Tiny synonym dictionary (academic style)
-        self.synonyms = {
-            "use": ["utilize", "employ", "apply"],
-            "uses": ["utilizes", "employs", "applies"],
-            "make": ["create", "construct", "develop"],
-            "good": ["effective", "beneficial", "advantageous"],
-            "bad": ["ineffective", "detrimental", "unfavorable"],
-            "show": ["demonstrate", "illustrate", "reveal"],
-            "help": ["assist", "facilitate", "support"],
-            "important": ["crucial", "essential", "vital"],
-            "new": ["novel", "innovative", "recent"],
-            "big": ["significant", "substantial", "considerable"],
-            "should": ["ought to", "must", "is recommended to"],
-            "enhances": ["augments", "improves", "strengthens"],
-        }
-    
-    def humanize_text(self, text):
-        """Main method to humanize text."""
-        if not text or not isinstance(text, str):
-            return "Invalid input"
-        
-        # Simple sentence split
-        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        transformed = []
-        
-        for sent in sentences:
-            if not sent:
-                continue
-            
-            s = self._expand_contractions(sent)
-            
-            if random.random() < self.p_transition:
-                s = f"{random.choice(self.transitions)} {s}"
-            
-            if random.random() < self.p_synonym:
-                s = self._replace_synonyms(s)
-            
-            if random.random() < self.p_rhythm:
-                s = self._vary_rhythm(s)
-            
-            transformed.append(s)
-        
-        return " ".join(transformed)
-    
-    def _expand_contractions(self, sentence):
-        """Expand common contractions."""
-        mapping = {
+
+        # Common contractions mapping
+        self.contractions_map = {
             "n't": " not", "'re": " are", "'s": " is", "'ll": " will",
-            "'ve": " have", "'d": " would", "'m": " am"
+            "'ve": " have", "'d": " would", "'m": " am",
+            "can't": "cannot", "won't": "will not", "don't": "do not",
+            "doesn't": "does not", "isn't": "is not", "aren't": "are not",
+            "wasn't": "was not", "weren't": "were not", "haven't": "have not",
+            "hasn't": "has not", "hadn't": "had not", "wouldn't": "would not",
+            "shouldn't": "should not", "couldn't": "could not", "mightn't": "might not"
         }
-        for k, v in mapping.items():
-            sentence = sentence.replace(k, v)
+
+    def humanize_text(self, text, use_passive=False, use_synonyms=False):
+        """
+        Humanize text with memory safety limits and strict input validation.
+        """
+        # Input validation
+        if not text or not isinstance(text, str):
+            return "Error: Invalid input text"
+            
+        text = text.strip()
+        if not text:
+            return "Please enter some text to process."
+
+        # Strict length limits for serverless
+        if len(text) > 10000:  # 10K character limit
+            return "Error: Input text too long for processing (max 10,000 characters)"
+        
+        try:
+            # Get sentences using the appropriate method
+            sentences = self._get_sentences(text)
+            
+            if not sentences:
+                return "No valid sentences found to process."
+
+            transformed_sentences = []
+            
+            for sentence in sentences:
+                if not sentence:
+                    continue
+                    
+                current_sentence = sentence
+
+                # 1. Expand contractions
+                current_sentence = self.expand_contractions(current_sentence)
+
+                # 2. Possibly add academic transitions (with lower probability)
+                if random.random() < self.p_academic_transition:
+                    current_sentence = self.add_academic_transitions(current_sentence)
+
+                # 3. Optionally convert to passive (simplified)
+                if use_passive and random.random() < self.p_passive:
+                    current_sentence = self.convert_to_passive_simple(current_sentence)
+
+                # 4. Optionally replace words with synonyms (simplified)
+                if use_synonyms and random.random() < self.p_synonym_replacement:
+                    current_sentence = self.replace_with_synonyms_simple(current_sentence)
+
+                transformed_sentences.append(current_sentence)
+
+            result = ' '.join(transformed_sentences)
+            
+            # Final safety check
+            if len(result) > 15000:  # Slightly larger to account for expansions
+                return "Error: Output too large after processing"
+                
+            return result
+            
+        except Exception as e:
+            return f"Error processing text: {str(e)}"
+
+    def _get_sentences(self, text):
+        """
+        Extract sentences using the best available method.
+        """
+        # Use NLTK sent_tokenize as primary method (most reliable)
+        try:
+            sentences = [s.strip() for s in sent_tokenize(text) if s.strip()]
+            if sentences:
+                return sentences
+        except Exception as e:
+            print(f"⚠️ NLTK sent_tokenize failed: {e}")
+        
+        # Fallback to spaCy with sentencizer if available
+        if self.nlp is not None:
+            try:
+                doc = self.nlp(text)
+                sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+                if sentences:
+                    return sentences
+            except Exception as e:
+                print(f"⚠️ spaCy sentence segmentation failed: {e}")
+        
+        # Final fallback: simple period-based splitting
+        sentences = [s.strip() for s in text.split('.') if s.strip()]
+        return sentences
+
+    def expand_contractions(self, sentence):
+        """
+        Expand common contractions efficiently.
+        """
+        if not sentence:
+            return sentence
+            
+        result = sentence
+        # Sort by length descending to handle longer contractions first
+        contractions_sorted = sorted(self.contractions_map.items(), 
+                                   key=lambda x: len(x[0]), 
+                                   reverse=True)
+        
+        for contraction, expansion in contractions_sorted:
+            result = result.replace(contraction, expansion)
+            
+        return result
+
+    def add_academic_transitions(self, sentence):
+        """
+        Add academic transition words at the beginning of sentences.
+        """
+        if not sentence:
+            return sentence
+            
+        transition = random.choice(self.academic_transitions)
+        return f"{transition} {sentence}"
+
+    def convert_to_passive_simple(self, sentence):
+        """
+        Simplified passive voice conversion using basic pattern matching.
+        """
+        if not sentence or len(sentence.split()) < 3:
+            return sentence
+
+        words = sentence.split()
+        
+        # Very basic pattern matching for common active structures
+        if len(words) >= 3:
+            # Check for simple subject-verb-object pattern
+            if (words[0][0].isupper() and  # Subject likely capitalized
+                words[1].lower() in ['is', 'are', 'was', 'were']):
+                return sentence  # Already passive-like
+            
+            # Simple transformation for common patterns
+            if len(words) == 3:
+                # "Subject Verb Object" -> "Object is Verb by Subject"
+                return f"{words[2]} is {words[1]} by {words[0].lower()}"
+            elif len(words) == 4:
+                # Handle simple cases with articles
+                if words[1] in ['a', 'an', 'the']:
+                    return f"{words[2]} {words[3]} is {words[1]} by {words[0].lower()}"
+        
         return sentence
-    
-    def _replace_synonyms(self, sentence):
-        """Replace words with academic synonyms."""
+
+    def replace_with_synonyms_simple(self, sentence):
+        """
+        Simplified synonym replacement without heavy models.
+        Focuses on common academic words.
+        """
+        if not sentence:
+            return sentence
+            
         words = sentence.split()
         new_words = []
         
-        for w in words:
-            key = w.lower().strip(".,!?")
-            if key in self.synonyms and random.random() < 0.6:
-                choice = random.choice(self.synonyms[key])
-                if w[0].isupper():
-                    choice = choice.capitalize()
-                new_words.append(choice)
-            else:
-                new_words.append(w)
-        
-        return " ".join(new_words)
-    
-    def _vary_rhythm(self, sentence):
-        """Vary sentence rhythm for naturalness."""
-        func = random.choice(self.rhythm_patterns)
-        try:
-            return func(sentence)
-        except Exception:
-            return sentence
-
-
-# Pydantic models
-class ProcessRequest(BaseModel):
-    text: str
-    use_passive: bool = False
-    use_synonyms: bool = False
-    p_synonym: float = 0.4
-    p_transition: float = 0.3
-    p_rhythm: float = 0.5
-    seed: int = None
-
-
-class ProcessResponse(BaseModel):
-    result: str
-    error: str = None
-
-
-# API Routes
-@app.post("/api/process", response_model=ProcessResponse)
-async def process_text(request: ProcessRequest):
-    """Process text with academic humanization."""
-    try:
-        # Validate input size
-        if len(request.text) > 10000:
-            return ProcessResponse(
-                result="", 
-                error="Text too long! Maximum 10,000 characters allowed."
-            )
-        
-        if not request.text.strip():
-            return ProcessResponse(
-                result="",
-                error="Please provide some text to process."
-            )
-        
-        # Validate probability values
-        if not all(0 <= p <= 1 for p in [request.p_synonym, request.p_transition, request.p_rhythm]):
-            return ProcessResponse(
-                result="",
-                error="Probability values must be between 0 and 1."
-            )
-        
-        # Initialize humanizer with custom parameters
-        humanizer = MicroAcademicHumanizer(
-            p_synonym=request.p_synonym if request.use_synonyms else 0,
-            p_transition=request.p_transition,
-            p_rhythm=request.p_rhythm,
-            seed=request.seed
-        )
-        
-        # Process text
-        result = humanizer.humanize_text(request.text)
-        
-        return ProcessResponse(result=result)
-        
-    except Exception as e:
-        return ProcessResponse(
-            result="", 
-            error=f"Processing error: {str(e)}"
-        )
-
-
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy", 
-        "service": "Linguify",
-        "version": "1.0.0"
-    }
-
-
-# HTML Frontend
-@app.get("/", response_class=HTMLResponse)
-async def read_root():
-    """Serve the frontend HTML."""
-    return """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Linguify 🪶 - Academic Text Refiner</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        # Common words that benefit from academic synonyms
+        academic_word_map = {
+            'big': ['substantial', 'considerable', 'significant'],
+            'small': ['minimal', 'modest', 'limited'],
+            'good': ['effective', 'beneficial', 'advantageous'],
+            'bad': ['ineffective', 'detrimental', 'problematic'],
+            'important': ['crucial', 'essential', 'paramount'],
+            'show': ['demonstrate', 'illustrate', 'reveal'],
+            'get': ['obtain', 'acquire', 'secure'],
+            'use': ['utilize', 'employ', 'implement'],
+            'make': ['create', 'produce', 'generate'],
+            'help': ['assist', 'facilitate', 'enable'],
+            'start': ['initiate', 'commence', 'undertake'],
+            'end': ['conclude', 'terminate', 'complete'],
+            'change': ['modify', 'alter', 'transform'],
+            'look': ['examine', 'analyze', 'investigate'],
+            'think': ['consider', 'contemplate', 'deliberate'],
+            'know': ['understand', 'comprehend', 'recognize'],
+            'see': ['observe', 'perceive', 'witness'],
+            'give': ['provide', 'offer', 'supply'],
+            'take': ['accept', 'receive', 'acquire'],
+            'put': ['place', 'position', 'locate'],
+            'keep': ['maintain', 'preserve', 'retain'],
+            'let': ['allow', 'permit', 'enable'],
+            'feel': ['experience', 'perceive', 'sense'],
+            'try': ['attempt', 'endeavor', 'strive'],
+            'work': ['function', 'operate', 'perform'],
+            'need': ['require', 'necessitate', 'demand'],
+            'want': ['desire', 'require', 'seek']
         }
         
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        .header {
-            text-align: center;
-            background: linear-gradient(90deg, #0072ff, #00c6ff);
-            color: white;
-            padding: 2rem;
-            border-radius: 16px;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        
-        .header h1 {
-            font-size: 2.5em;
-            font-weight: 800;
-            margin-bottom: 0.5rem;
-        }
-        
-        .header p {
-            font-size: 1.2em;
-            opacity: 0.9;
-        }
-        
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 2rem;
-        }
-        
-        @media (max-width: 768px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        .sidebar {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        
-        .content {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: 600;
-            color: #374151;
-        }
-        
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            margin-bottom: 0.5rem;
-        }
-        
-        .checkbox-group input {
-            margin-right: 0.5rem;
-        }
-        
-        textarea {
-            width: 100%;
-            min-height: 200px;
-            padding: 1rem;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-family: inherit;
-            font-size: 14px;
-            resize: vertical;
-        }
-        
-        textarea:focus {
-            outline: none;
-            border-color: #0072ff;
-            box-shadow: 0 0 0 3px rgba(0, 114, 255, 0.1);
-        }
-        
-        button {
-            background: linear-gradient(90deg, #0072ff, #00c6ff);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            width: 100%;
-        }
-        
-        button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0, 114, 255, 0.3);
-        }
-        
-        button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .output {
-            background: #f8fafc;
-            padding: 1.5rem;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-            min-height: 200px;
-            white-space: pre-wrap;
-            font-size: 14px;
-            line-height: 1.6;
-        }
-        
-        .loading {
-            display: none;
-            text-align: center;
-            color: #0072ff;
-            padding: 1rem;
-        }
-        
-        .error {
-            color: #dc2626;
-            background: #fef2f2;
-            padding: 1rem;
-            border-radius: 8px;
-            border: 1px solid #fecaca;
-        }
-        
-        .success {
-            color: #059669;
-            background: #f0fdf4;
-            padding: 1rem;
-            border-radius: 8px;
-            border: 1px solid #bbf7d0;
-        }
-        
-        .examples {
-            margin-top: 2rem;
-        }
-        
-        .example-text {
-            background: #f8fafc;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 0.5rem;
-            cursor: pointer;
-            border: 1px solid #e2e8f0;
-            transition: all 0.2s;
-            font-size: 14px;
-        }
-        
-        .example-text:hover {
-            background: #e2e8f0;
-            border-color: #0072ff;
-        }
-        
-        .footer {
-            text-align: center;
-            margin-top: 3rem;
-            padding: 1rem;
-            border-top: 1px solid #e2e8f0;
-            color: #64748b;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Linguify 🪶</h1>
-            <p>Refine and Humanize AI-generated content into polished academic writing</p>
-        </div>
-        
-        <div class="main-content">
-            <div class="sidebar">
-                <div class="form-group">
-                    <h3>⚙️ Linguify Options</h3>
-                    <p style="margin-bottom: 1rem; color: #64748b;">Customize your refinement settings:</p>
+        for word in words:
+            # Only process words that are likely to have good synonyms
+            clean_word = word.lower().strip('.,!?;:')
+            
+            if (len(clean_word) > 3 and 
+                clean_word.isalpha() and 
+                random.random() < 0.4 and  # 40% chance per eligible word
+                clean_word in academic_word_map):
+                
+                synonyms = academic_word_map[clean_word]
+                chosen_synonym = random.choice(synonyms)
+                
+                # Preserve capitalization
+                if word[0].isupper():
+                    chosen_synonym = chosen_synonym.capitalize()
                     
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="useSynonyms" checked>
-                        <label for="useSynonyms" style="margin: 0;">Replace with Formal Synonyms</label>
-                    </div>
-                </div>
+                new_words.append(chosen_synonym)
+            else:
+                new_words.append(word)
                 
-                <div class="form-group">
-                    <h3>📝 Text Limits</h3>
-                    <p><strong>Maximum limits:</strong></p>
-                    <ul style="margin-left: 1.5rem; color: #64748b; margin-top: 0.5rem;">
-                        <li>10,000 characters</li>
-                        <li>~2,000 words</li>
-                    </ul>
-                </div>
-                
-                <div class="examples">
-                    <h3>💡 Example Inputs</h3>
-                    <div class="example-text" onclick="loadExample(0)">
-                        AI technology enhances productivity across organizations.
-                    </div>
-                    <div class="example-text" onclick="loadExample(1)">
-                        We should optimize efficiencies through innovative solutions.
-                    </div>
-                    <div class="example-text" onclick="loadExample(2)">
-                        The company uses cutting-edge solutions to drive innovation.
-                    </div>
-                </div>
-            </div>
-            
-            <div class="content">
-                <div class="form-group">
-                    <label for="inputText">📝 Input Text</label>
-                    <textarea 
-                        id="inputText" 
-                        placeholder="Type or paste your text here to refine... (Max 10,000 characters)"
-                        maxlength="10000"
-                    ></textarea>
-                    <div style="text-align: right; margin-top: 0.5rem; color: #64748b; font-size: 14px;">
-                        <span id="charCount">0</span>/10,000 characters
-                    </div>
-                </div>
-                
-                <button onclick="processText()" id="processBtn">
-                    ✨ Refine with Linguify
-                </button>
-                
-                <div class="loading" id="loading">
-                    ⏳ Processing your text... Please wait.
-                </div>
-                
-                <div class="form-group" style="margin-top: 2rem;">
-                    <label for="outputText">🎓 Refined Output</label>
-                    <div class="output" id="outputText">
-                        Results will appear here...
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <p>🪶 Linguify — Academic Text Refiner | Crafted with care by Arunsystems</p>
-        </div>
-    </div>
+        return ' '.join(new_words)
 
-    <script>
-        const examples = [
-            "AI technology enhances productivity across organizations.",
-            "We should optimize efficiencies through innovative solutions.",
-            "The company uses cutting-edge solutions to drive innovation."
-        ];
-        
-        function loadExample(index) {
-            document.getElementById('inputText').value = examples[index];
-            updateCharCount();
-        }
-        
-        function updateCharCount() {
-            const textarea = document.getElementById('inputText');
-            const charCount = document.getElementById('charCount');
-            charCount.textContent = textarea.value.length.toLocaleString();
-        }
-        
-        document.getElementById('inputText').addEventListener('input', updateCharCount);
-        
-        async function processText() {
-            const inputText = document.getElementById('inputText').value.trim();
-            const useSynonyms = document.getElementById('useSynonyms').checked;
-            const outputElement = document.getElementById('outputText');
-            const loadingElement = document.getElementById('loading');
-            const processBtn = document.getElementById('processBtn');
+    def _get_simple_synonyms(self, word):
+        """
+        Get synonyms using WordNet with memory limits.
+        Fallback method if the static map doesn't have the word.
+        """
+        if not word or len(word) <= 3:
+            return None
             
-            if (!inputText) {
-                outputElement.innerHTML = '<div class="error">⚠️ Please enter some text to begin refinement.</div>';
-                return;
-            }
+        try:
+            synonyms = set()
+            for syn in wordnet.synsets(word):
+                for lemma in syn.lemmas():
+                    lemma_name = lemma.name().replace('_', ' ')
+                    if (lemma_name.lower() != word.lower() and 
+                        len(lemma_name.split()) == 1 and  # Single word only
+                        lemma_name.isalpha() and
+                        len(lemma_name) > 3):  # Avoid very short synonyms
+                        synonyms.add(lemma_name)
+                        
+                        # Limit to 3 synonyms to save memory
+                        if len(synonyms) >= 3:
+                            break
+                if len(synonyms) >= 3:
+                    break
+                    
+            return list(synonyms) if synonyms else None
             
-            if (inputText.length > 10000) {
-                outputElement.innerHTML = '<div class="error">⚠️ Text too long! Maximum 10,000 characters allowed.</div>';
-                return;
-            }
-            
-            // Show loading state
-            loadingElement.style.display = 'block';
-            processBtn.disabled = true;
-            outputElement.innerHTML = 'Processing...';
-            
-            try {
-                const response = await fetch('/api/process', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        text: inputText,
-                        use_synonyms: useSynonyms,
-                        p_synonym: 0.4,
-                        p_transition: 0.3,
-                        p_rhythm: 0.5
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.error) {
-                    outputElement.innerHTML = `<div class="error">❌ ${data.error}</div>`;
-                } else {
-                    outputElement.innerHTML = `<div class="success">${data.result}</div>`;
-                }
-                
-            } catch (error) {
-                outputElement.innerHTML = `<div class="error">❌ Network error: Please check your connection and try again.</div>`;
-                console.error('Error:', error);
-            } finally {
-                loadingElement.style.display = 'none';
-                processBtn.disabled = false;
-            }
-        }
-        
-        // Allow Enter key to submit (with Shift+Enter for new line)
-        document.getElementById('inputText').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey && e.ctrlKey) {
-                e.preventDefault();
-                processText();
-            }
-        });
-        
-        // Initialize character count
-        updateCharCount();
-    </script>
-</body>
-</html>
-"""
+        except Exception:
+            return None
 
+    # Original methods kept as fallbacks but with memory optimizations
+    def convert_to_passive(self, sentence):
+        """
+        Original passive conversion (fallback) with memory safety.
+        """
+        if self.nlp is None or len(sentence) > 500:
+            return self.convert_to_passive_simple(sentence)
+            
+        try:
+            doc = self.nlp(sentence)
+            subj_tokens = [t for t in doc if t.dep_ == 'nsubj' and t.head.dep_ == 'ROOT']
+            dobj_tokens = [t for t in doc if t.dep_ == 'dobj']
 
-# Vercel handler (required for Vercel deployment)
-handler = app
+            if subj_tokens and dobj_tokens:
+                subject = subj_tokens[0]
+                dobj = dobj_tokens[0]
+                verb = subject.head
+                if subject.i < verb.i < dobj.i:
+                    passive_str = f"{dobj.text} {verb.lemma_} by {subject.text}"
+                    original_str = ' '.join(token.text for token in doc)
+                    chunk = f"{subject.text} {verb.text} {dobj.text}"
+                    if chunk in original_str:
+                        return original_str.replace(chunk, passive_str)
+            return sentence
+        except Exception:
+            return self.convert_to_passive_simple(sentence)
+
+    def replace_with_synonyms(self, sentence):
+        """
+        Original synonym replacement (fallback) with WordNet.
+        """
+        if len(sentence) > 1000:  # Skip for very long sentences
+            return sentence
+            
+        try:
+            tokens = word_tokenize(sentence)
+            pos_tags = nltk.pos_tag(tokens)
+
+            new_tokens = []
+            for (word, pos) in pos_tags:
+                if (pos.startswith(('J', 'N', 'V', 'R')) and 
+                    len(word) > 3 and 
+                    word.isalpha() and
+                    wordnet.synsets(word)):
+                    if random.random() < 0.3:  # Lower probability for memory safety
+                        synonyms = self._get_synonyms(word, pos)
+                        if synonyms:
+                            # Use random selection instead of model-based for memory
+                            best_synonym = random.choice(synonyms)
+                            new_tokens.append(best_synonym if best_synonym else word)
+                        else:
+                            new_tokens.append(word)
+                    else:
+                        new_tokens.append(word)
+                else:
+                    new_tokens.append(word)
+
+            return ' '.join(new_tokens)
+        except Exception:
+            return self.replace_with_synonyms_simple(sentence)
+
+    def _get_synonyms(self, word, pos):
+        """
+        Get synonyms with POS filtering and memory limits.
+        """
+        if len(word) <= 3:
+            return None
+            
+        wn_pos = None
+        if pos.startswith('J'):
+            wn_pos = wordnet.ADJ
+        elif pos.startswith('N'):
+            wn_pos = wordnet.NOUN
+        elif pos.startswith('R'):
+            wn_pos = wordnet.ADV
+        elif pos.startswith('V'):
+            wn_pos = wordnet.VERB
+
+        synonyms = set()
+        try:
+            for syn in wordnet.synsets(word, pos=wn_pos):
+                for lemma in syn.lemmas():
+                    lemma_name = lemma.name().replace('_', ' ')
+                    if (lemma_name.lower() != word.lower() and
+                        len(lemma_name.split()) == 1 and
+                        lemma_name.isalpha()):
+                        synonyms.add(lemma_name)
+                        # Strict memory limit
+                        if len(synonyms) >= 5:
+                            break
+                if len(synonyms) >= 5:
+                    break
+            return list(synonyms)
+        except Exception:
+            return None
+
+# Initialize NLTK resources when module is imported
+download_nltk_resources()
