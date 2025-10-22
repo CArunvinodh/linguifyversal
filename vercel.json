@@ -1,4 +1,4 @@
-{
+json{
   "version": 2,
   "builds": [
     {
@@ -13,3 +13,14 @@
     }
   ]
 }
+```
+
+### 3. Create `.vercelignore`:
+```
+__pycache__/
+*.pyc
+.git/
+.venv/
+venv/
+models/
+*.so
