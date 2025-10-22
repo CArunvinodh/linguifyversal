@@ -12,12 +12,3 @@
     }
   ]
 }
-```
-
-## 3. Project Structure:
-```
-your-project/
-├── api/
-│   └── index.py          ← Put the artifact code here
-├── requirements.txt       ← FastAPI dependencies
-└── vercel.json           ← Vercel configuration
