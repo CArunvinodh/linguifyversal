@@ -57,7 +57,7 @@ def humanize_text_safe(text, use_passive, use_synonyms):
         humanizer = AcademicTextHumanizer(
             p_passive=0.2,  # Reduced from 0.3
             p_synonym_replacement=0.2,  # Reduced from 0.3
-            p_academic_transition=0.3  # Reduced from 0.4
+            p_academic_transition=0.2  # Reduced from 0.4
         )
         
         # Process text
@@ -381,3 +381,4 @@ async def read_root():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 7860)))
+
