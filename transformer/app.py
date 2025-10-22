@@ -14,9 +14,12 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 # Global NLP model with memory optimization
 try:
-    # Load spaCy with minimal components to save memory
-    NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["parser", "ner", "textcat"])
-    print("✅ spaCy model loaded successfully")
+    # Load spaCy with sentencizer for sentence boundary detection
+    NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
+    # Add sentencizer to handle sentence boundaries
+    if "sentencizer" not in NLP_GLOBAL.pipe_names:
+        NLP_GLOBAL.add_pipe("sentencizer")
+    print("✅ spaCy model loaded successfully with sentencizer")
 except OSError:
     # Fallback for environments without spacy model
     NLP_GLOBAL = None
@@ -58,12 +61,16 @@ class AcademicTextHumanizer:
         if seed is not None:
             random.seed(seed)
 
-        # Load spaCy with minimal components for memory efficiency
+        # Load spaCy with sentencizer for sentence boundary detection
         try:
-            self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner", "textcat"])
+            self.nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
+            # Add sentencizer to handle sentence boundaries
+            if "sentencizer" not in self.nlp.pipe_names:
+                self.nlp.add_pipe("sentencizer")
+            print("✅ AcademicTextHumanizer: spaCy loaded with sentencizer")
         except OSError:
             self.nlp = None
-            print("⚠️ spaCy model not available - using basic text processing")
+            print("⚠️ AcademicTextHumanizer: spaCy not available - using basic text processing")
 
         # Conservative probabilities for serverless
         self.p_passive = min(p_passive, 0.3)  # Cap at 30%
@@ -104,14 +111,9 @@ class AcademicTextHumanizer:
             return "Error: Input text too long for processing (max 10,000 characters)"
         
         try:
-            # Use basic sentence splitting for memory efficiency
-            if self.nlp is None:
-                sentences = [s.strip() for s in sent_tokenize(text) if s.strip()]
-            else:
-                # Use spaCy for better sentence segmentation if available
-                doc = self.nlp(text)
-                sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
-
+            # Get sentences using the appropriate method
+            sentences = self._get_sentences(text)
+            
             if not sentences:
                 return "No valid sentences found to process."
 
@@ -150,6 +152,32 @@ class AcademicTextHumanizer:
             
         except Exception as e:
             return f"Error processing text: {str(e)}"
+
+    def _get_sentences(self, text):
+        """
+        Extract sentences using the best available method.
+        """
+        # Use NLTK sent_tokenize as primary method (most reliable)
+        try:
+            sentences = [s.strip() for s in sent_tokenize(text) if s.strip()]
+            if sentences:
+                return sentences
+        except Exception as e:
+            print(f"⚠️ NLTK sent_tokenize failed: {e}")
+        
+        # Fallback to spaCy with sentencizer if available
+        if self.nlp is not None:
+            try:
+                doc = self.nlp(text)
+                sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+                if sentences:
+                    return sentences
+            except Exception as e:
+                print(f"⚠️ spaCy sentence segmentation failed: {e}")
+        
+        # Final fallback: simple period-based splitting
+        sentences = [s.strip() for s in text.split('.') if s.strip()]
+        return sentences
 
     def expand_contractions(self, sentence):
         """
@@ -235,7 +263,17 @@ class AcademicTextHumanizer:
             'look': ['examine', 'analyze', 'investigate'],
             'think': ['consider', 'contemplate', 'deliberate'],
             'know': ['understand', 'comprehend', 'recognize'],
-            'see': ['observe', 'perceive', 'witness']
+            'see': ['observe', 'perceive', 'witness'],
+            'give': ['provide', 'offer', 'supply'],
+            'take': ['accept', 'receive', 'acquire'],
+            'put': ['place', 'position', 'locate'],
+            'keep': ['maintain', 'preserve', 'retain'],
+            'let': ['allow', 'permit', 'enable'],
+            'feel': ['experience', 'perceive', 'sense'],
+            'try': ['attempt', 'endeavor', 'strive'],
+            'work': ['function', 'operate', 'perform'],
+            'need': ['require', 'necessitate', 'demand'],
+            'want': ['desire', 'require', 'seek']
         }
         
         for word in words:
