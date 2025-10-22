@@ -9,8 +9,29 @@ from nltk.corpus import wordnet
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # ------------------------------
-# Initialize spaCy & NLTK
+# Safe NLTK setup for serverless
 # ------------------------------
+def safe_nltk_setup():
+    try:
+        nltk.data.find("tokenizers/punkt")
+    except LookupError:
+        nltk.download("punkt", quiet=True)
+    try:
+        nltk.data.find("corpora/wordnet")
+    except LookupError:
+        nltk.download("wordnet", quiet=True)
+    try:
+        nltk.data.find("taggers/averaged_perceptron_tagger_eng")
+    except LookupError:
+        nltk.download("averaged_perceptron_tagger_eng", quiet=True)
+    try:
+        nltk.data.find("corpora/omw-1.4")
+    except LookupError:
+        nltk.download("omw-1.4", quiet=True)
+
+safe_nltk_setup()
+
+# Load spaCy
 try:
     NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
 except OSError:
@@ -18,32 +39,12 @@ except OSError:
     subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
     NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
 
-def download_nltk_resources():
-    """Ensure required NLTK data is available (for serverless)."""
-    try:
-        _create_unverified_https_context = ssl._create_unverified_context
-    except AttributeError:
-        pass
-    else:
-        ssl._create_default_https_context = _create_unverified_https_context
-
-    for r in ["punkt", "wordnet", "averaged_perceptron_tagger", "averaged_perceptron_tagger_eng", "omw-1.4"]:
-        try:
-            nltk.download(r, quiet=True)
-        except Exception as e:
-            print(f"⚠️ Error downloading {r}: {e}")
-
-download_nltk_resources()
-
 
 # ------------------------------
-# Main Humanizer Class
+# Humanizer Class
 # ------------------------------
 class AcademicTextHumanizer:
-    """
-    Serverless-friendly academic text rewriter.
-    Adds natural rhythm, transitions, passive phrasing, and lexical variation.
-    """
+    """Serverless-safe academic text humanizer with rhythm variation."""
 
     def __init__(
         self,
@@ -51,7 +52,7 @@ class AcademicTextHumanizer:
         p_synonym_replacement=0.5,
         p_academic_transition=0.4,
         p_rhythm_variation=0.5,
-        seed=None
+        seed=None,
     ):
         if seed is not None:
             random.seed(seed)
@@ -68,12 +69,11 @@ class AcademicTextHumanizer:
         ]
 
         self.rhythm_patterns = [
-            # adds commas, semicolons, and clause pauses
             lambda s: s.replace(".", ", and").replace(";", ",") + ".",
-            lambda s: s + " Interestingly, this trend continues.",
+            lambda s: s + " Interestingly, this observation persists.",
             lambda s: s.replace(",", ";").replace(" and ", ", while "),
-            lambda s: s + " This, in turn, emphasizes the broader implication.",
-            lambda s: "To elaborate, " + s[0].lower() + s[1:] if len(s) > 10 else s
+            lambda s: s + " This, in turn, highlights a broader implication.",
+            lambda s: "To elaborate, " + s[0].lower() + s[1:] if len(s) > 10 else s,
         ]
 
         self.contraction_map = {
@@ -82,7 +82,7 @@ class AcademicTextHumanizer:
         }
 
     # ------------------------------
-    # Main entry
+    # Core transformation
     # ------------------------------
     def humanize_text(self, text, use_passive=False, use_synonyms=False):
         if not text or not isinstance(text, str):
@@ -96,33 +96,27 @@ class AcademicTextHumanizer:
             if not sentence:
                 continue
 
-            # 1️⃣ Expand contractions
             sentence = self.expand_contractions(sentence)
 
-            # 2️⃣ Add transition
             if random.random() < self.p_academic_transition:
                 sentence = self.add_academic_transition(sentence)
 
-            # 3️⃣ Passive structure
             if use_passive and random.random() < self.p_passive:
                 sentence = self.convert_to_passive(sentence)
 
-            # 4️⃣ Synonym replacements
             if use_synonyms and random.random() < self.p_synonym_replacement:
                 sentence = self.replace_with_synonyms(sentence)
 
-            # 5️⃣ Sentence rhythm & variation
             if random.random() < self.p_rhythm_variation:
                 sentence = self.vary_sentence_rhythm(sentence)
 
             transformed.append(sentence)
 
-        # Smooth join to simulate human flow
-        text_out = " ".join(transformed)
-        return self._smooth_join(text_out)
+        result = " ".join(transformed)
+        return self._smooth_join(result)
 
     # ------------------------------
-    # Helper functions
+    # Text transformations
     # ------------------------------
     def expand_contractions(self, sentence):
         tokens = word_tokenize(sentence)
@@ -147,7 +141,7 @@ class AcademicTextHumanizer:
             s, o, v = subj[0], dobj[0], subj[0].head
             passive = f"{o.text} is {v.lemma_} by {s.text}"
             return sentence.replace(f"{s.text} {v.text} {o.text}", passive)
-        return sentence + " This observation is frequently acknowledged in studies."
+        return sentence + " This notion is frequently acknowledged in research."
 
     def replace_with_synonyms(self, sentence):
         tokens = word_tokenize(sentence)
@@ -198,7 +192,6 @@ class AcademicTextHumanizer:
             return sentence
 
     def _smooth_join(self, text):
-        # Natural flow: random comma insertion, minor casing tweaks
         text = text.replace(" .", ".").replace(" ,", ",")
         if random.random() < 0.3:
             text = text.replace(". ", "; ").replace(";", ",")
@@ -206,10 +199,10 @@ class AcademicTextHumanizer:
 
 
 # ------------------------------
-# Example Test
+# Example usage
 # ------------------------------
 if __name__ == "__main__":
-    sample = """Artificial intelligence is transforming industries. 
+    sample = """Artificial intelligence is transforming industries.
     Researchers use algorithms to enhance efficiency and accuracy in predictive tasks."""
     humanizer = AcademicTextHumanizer()
     print(humanizer.humanize_text(sample, use_passive=True, use_synonyms=True))
