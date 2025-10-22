@@ -1,14 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from transformer.app import AcademicTextHumanizer, download_nltk_resources
-import os
+import random
+import re
 
-# Initialize
-download_nltk_resources()
-
+# Initialize FastAPI app
 app = FastAPI(title="Linguify")
 
 # CORS middleware
@@ -19,17 +16,136 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+class MicroAcademicHumanizer:
+    """Ultra-lightweight text humanizer for Vercel / AWS Lambda."""
+    
+    def __init__(
+        self,
+        p_synonym=0.4,
+        p_transition=0.3,
+        p_rhythm=0.5,
+        seed=None
+    ):
+        if seed is not None:
+            random.seed(seed)
+        self.p_synonym = p_synonym
+        self.p_transition = p_transition
+        self.p_rhythm = p_rhythm
+        
+        # Transitions and rhythm patterns
+        self.transitions = [
+            "Moreover,", "Furthermore,", "Consequently,", "Therefore,",
+            "Hence,", "In addition,", "Notably,", "Importantly,"
+        ]
+        
+        self.rhythm_patterns = [
+            lambda s: s + " This highlights a broader implication.",
+            lambda s: "To elaborate, " + s[0].lower() + s[1:] if len(s) > 10 else s,
+            lambda s: s.replace(",", ";").replace(" and ", ", while "),
+            lambda s: s.replace(".", ", and").rstrip(",") + ".",
+        ]
+        
+        # Tiny synonym dictionary (academic style)
+        self.synonyms = {
+            "use": ["utilize", "employ", "apply"],
+            "uses": ["utilizes", "employs", "applies"],
+            "make": ["create", "construct", "develop"],
+            "good": ["effective", "beneficial", "advantageous"],
+            "bad": ["ineffective", "detrimental", "unfavorable"],
+            "show": ["demonstrate", "illustrate", "reveal"],
+            "help": ["assist", "facilitate", "support"],
+            "important": ["crucial", "essential", "vital"],
+            "new": ["novel", "innovative", "recent"],
+            "big": ["significant", "substantial", "considerable"],
+            "should": ["ought to", "must", "is recommended to"],
+            "enhances": ["augments", "improves", "strengthens"],
+        }
+    
+    def humanize_text(self, text):
+        """Main method to humanize text."""
+        if not text or not isinstance(text, str):
+            return "Invalid input"
+        
+        # Simple sentence split
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        transformed = []
+        
+        for sent in sentences:
+            if not sent:
+                continue
+            
+            s = self._expand_contractions(sent)
+            
+            if random.random() < self.p_transition:
+                s = f"{random.choice(self.transitions)} {s}"
+            
+            if random.random() < self.p_synonym:
+                s = self._replace_synonyms(s)
+            
+            if random.random() < self.p_rhythm:
+                s = self._vary_rhythm(s)
+            
+            transformed.append(s)
+        
+        return " ".join(transformed)
+    
+    def _expand_contractions(self, sentence):
+        """Expand common contractions."""
+        mapping = {
+            "n't": " not", "'re": " are", "'s": " is", "'ll": " will",
+            "'ve": " have", "'d": " would", "'m": " am"
+        }
+        for k, v in mapping.items():
+            sentence = sentence.replace(k, v)
+        return sentence
+    
+    def _replace_synonyms(self, sentence):
+        """Replace words with academic synonyms."""
+        words = sentence.split()
+        new_words = []
+        
+        for w in words:
+            key = w.lower().strip(".,!?")
+            if key in self.synonyms and random.random() < 0.6:
+                choice = random.choice(self.synonyms[key])
+                if w[0].isupper():
+                    choice = choice.capitalize()
+                new_words.append(choice)
+            else:
+                new_words.append(w)
+        
+        return " ".join(new_words)
+    
+    def _vary_rhythm(self, sentence):
+        """Vary sentence rhythm for naturalness."""
+        func = random.choice(self.rhythm_patterns)
+        try:
+            return func(sentence)
+        except Exception:
+            return sentence
+
+
+# Pydantic models
 class ProcessRequest(BaseModel):
     text: str
     use_passive: bool = False
     use_synonyms: bool = False
+    p_synonym: float = 0.4
+    p_transition: float = 0.3
+    p_rhythm: float = 0.5
+    seed: int = None
+
 
 class ProcessResponse(BaseModel):
     result: str
     error: str = None
 
+
+# API Routes
 @app.post("/api/process", response_model=ProcessResponse)
 async def process_text(request: ProcessRequest):
+    """Process text with academic humanization."""
     try:
         # Validate input size
         if len(request.text) > 10000:
@@ -38,30 +154,53 @@ async def process_text(request: ProcessRequest):
                 error="Text too long! Maximum 10,000 characters allowed."
             )
         
-        humanizer = AcademicTextHumanizer(
-            p_passive=0.2,
-            p_synonym_replacement=0.2,
-            p_academic_transition=0.2
+        if not request.text.strip():
+            return ProcessResponse(
+                result="",
+                error="Please provide some text to process."
+            )
+        
+        # Validate probability values
+        if not all(0 <= p <= 1 for p in [request.p_synonym, request.p_transition, request.p_rhythm]):
+            return ProcessResponse(
+                result="",
+                error="Probability values must be between 0 and 1."
+            )
+        
+        # Initialize humanizer with custom parameters
+        humanizer = MicroAcademicHumanizer(
+            p_synonym=request.p_synonym if request.use_synonyms else 0,
+            p_transition=request.p_transition,
+            p_rhythm=request.p_rhythm,
+            seed=request.seed
         )
         
-        result = humanizer.humanize_text(
-            request.text,
-            use_passive=request.use_passive,
-            use_synonyms=request.use_synonyms
-        )
+        # Process text
+        result = humanizer.humanize_text(request.text)
         
         return ProcessResponse(result=result)
         
     except Exception as e:
-        return ProcessResponse(result="", error=f"Processing error: {str(e)}")
+        return ProcessResponse(
+            result="", 
+            error=f"Processing error: {str(e)}"
+        )
+
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "service": "Linguify"}
+    """Health check endpoint."""
+    return {
+        "status": "healthy", 
+        "service": "Linguify",
+        "version": "1.0.0"
+    }
+
 
 # HTML Frontend
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
+    """Serve the frontend HTML."""
     return """
 <!DOCTYPE html>
 <html lang="en">
@@ -243,6 +382,7 @@ async def read_root():
             cursor: pointer;
             border: 1px solid #e2e8f0;
             transition: all 0.2s;
+            font-size: 14px;
         }
         
         .example-text:hover {
@@ -270,25 +410,20 @@ async def read_root():
             <div class="sidebar">
                 <div class="form-group">
                     <h3>⚙️ Linguify Options</h3>
-                    <p>Customize your refinement settings:</p>
+                    <p style="margin-bottom: 1rem; color: #64748b;">Customize your refinement settings:</p>
                     
                     <div class="checkbox-group">
-                        <input type="checkbox" id="usePassive">
-                        <label for="usePassive">Convert sentences to Passive Voice</label>
-                    </div>
-                    
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="useSynonyms">
-                        <label for="useSynonyms">Replace with Formal Synonyms</label>
+                        <input type="checkbox" id="useSynonyms" checked>
+                        <label for="useSynonyms" style="margin: 0;">Replace with Formal Synonyms</label>
                     </div>
                 </div>
                 
                 <div class="form-group">
                     <h3>📝 Text Limits</h3>
                     <p><strong>Maximum limits:</strong></p>
-                    <ul style="margin-left: 1.5rem; color: #64748b;">
+                    <ul style="margin-left: 1.5rem; color: #64748b; margin-top: 0.5rem;">
                         <li>10,000 characters</li>
-                        <li>2,000 words</li>
+                        <li>~2,000 words</li>
                     </ul>
                 </div>
                 
@@ -314,8 +449,8 @@ async def read_root():
                         placeholder="Type or paste your text here to refine... (Max 10,000 characters)"
                         maxlength="10000"
                     ></textarea>
-                    <div style="text-align: right; margin-top: 0.5rem; color: #64748b;">
-                        <span id="charCount">0</span>/10000 characters
+                    <div style="text-align: right; margin-top: 0.5rem; color: #64748b; font-size: 14px;">
+                        <span id="charCount">0</span>/10,000 characters
                     </div>
                 </div>
                 
@@ -324,7 +459,7 @@ async def read_root():
                 </button>
                 
                 <div class="loading" id="loading">
-                    Processing your text... Please wait.
+                    ⏳ Processing your text... Please wait.
                 </div>
                 
                 <div class="form-group" style="margin-top: 2rem;">
@@ -356,14 +491,13 @@ async def read_root():
         function updateCharCount() {
             const textarea = document.getElementById('inputText');
             const charCount = document.getElementById('charCount');
-            charCount.textContent = textarea.value.length;
+            charCount.textContent = textarea.value.length.toLocaleString();
         }
         
         document.getElementById('inputText').addEventListener('input', updateCharCount);
         
         async function processText() {
             const inputText = document.getElementById('inputText').value.trim();
-            const usePassive = document.getElementById('usePassive').checked;
             const useSynonyms = document.getElementById('useSynonyms').checked;
             const outputElement = document.getElementById('outputText');
             const loadingElement = document.getElementById('loading');
@@ -392,8 +526,10 @@ async def read_root():
                     },
                     body: JSON.stringify({
                         text: inputText,
-                        use_passive: usePassive,
-                        use_synonyms: useSynonyms
+                        use_synonyms: useSynonyms,
+                        p_synonym: 0.4,
+                        p_transition: 0.3,
+                        p_rhythm: 0.5
                     })
                 });
                 
@@ -407,11 +543,20 @@ async def read_root():
                 
             } catch (error) {
                 outputElement.innerHTML = `<div class="error">❌ Network error: Please check your connection and try again.</div>`;
+                console.error('Error:', error);
             } finally {
                 loadingElement.style.display = 'none';
                 processBtn.disabled = false;
             }
         }
+        
+        // Allow Enter key to submit (with Shift+Enter for new line)
+        document.getElementById('inputText').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey && e.ctrlKey) {
+                e.preventDefault();
+                processText();
+            }
+        });
         
         // Initialize character count
         updateCharCount();
@@ -419,3 +564,7 @@ async def read_root():
 </body>
 </html>
 """
+
+
+# Vercel handler (required for Vercel deployment)
+handler = app
