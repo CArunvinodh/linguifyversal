@@ -1,15 +1,23 @@
 {
-  "version": 2,
   "builds": [
     {
-      "src": "app.py",
+      "src": "api/index.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "app.py"
+      "dest": "api/index.py"
     }
   ]
 }
+```
+
+## 3. Project Structure:
+```
+your-project/
+├── api/
+│   └── index.py          ← Put the artifact code here
+├── requirements.txt       ← FastAPI dependencies
+└── vercel.json           ← Vercel configuration
