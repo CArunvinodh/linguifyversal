@@ -5,216 +5,211 @@ import nltk
 import spacy
 from nltk.tokenize import word_tokenize
 from nltk.corpus import wordnet
-try:
-    from sentence_transformers import SentenceTransformer
-    self.model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
-except Exception as e:
-    print("⚠️ Model load failed:", e)
-    self.model = None
-if self.model is None:
-    return random.choice(synonyms)
 
-# -----------------------------
-# Setup and Warnings Handling
-# -----------------------------
+# Disable warnings for cleaner serverless logs
 warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
 
-# Load spaCy model globally
-NLP_GLOBAL = spacy.load("en_core_web_sm")
+# ------------------------------
+# Initialize spaCy + NLTK
+# ------------------------------
+try:
+    NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
+except OSError:
+    import subprocess
+    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+    NLP_GLOBAL = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
 
 def download_nltk_resources():
-    """Ensure NLTK dependencies are present."""
+    """Ensure required NLTK data is available"""
     try:
         _create_unverified_https_context = ssl._create_unverified_context
-        ssl._create_default_https_context = _create_unverified_https_context
     except AttributeError:
         pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
 
     resources = [
-        'punkt', 'punkt_tab',
-        'averaged_perceptron_tagger', 'averaged_perceptron_tagger_eng',
-        'wordnet'
+        'punkt', 'wordnet', 'averaged_perceptron_tagger', 
+        'averaged_perceptron_tagger_eng', 'omw-1.4'
     ]
-    for r in resources:
+    for resource in resources:
         try:
-            nltk.download(r, quiet=True)
-        except Exception:
-            pass
+            nltk.download(resource, quiet=True)
+        except Exception as e:
+            print(f"⚠️ Error downloading {resource}: {str(e)}")
 
 download_nltk_resources()
 
-# -----------------------------
-# Main Class
-# -----------------------------
+
+# ------------------------------
+# Main Humanizer Class
+# ------------------------------
 class AcademicTextHumanizer:
     """
-    Transforms text into a more formal, human-like academic style.
-    Includes contraction expansion, transitions, optional passive voice, and
-    synonym-based paraphrasing with semantic similarity.
+    Lightweight serverless-safe academic text humanizer.
+    Produces formal, natural-sounding text suitable for AI detection bypass.
     """
 
     def __init__(
         self,
-        model_name='paraphrase-MiniLM-L6-v2',
-        p_passive=0.25,
-        p_synonym_replacement=0.35,
-        p_academic_transition=0.35,
+        p_passive=0.3,
+        p_synonym_replacement=0.5,
+        p_academic_transition=0.4,
         seed=None
     ):
         if seed is not None:
             random.seed(seed)
 
         self.nlp = NLP_GLOBAL
-        self.model = SentenceTransformer(model_name)
-
-        # Transformation probabilities
         self.p_passive = p_passive
         self.p_synonym_replacement = p_synonym_replacement
         self.p_academic_transition = p_academic_transition
 
-        # Transitions for academic coherence
+        # Smooth academic transitions
         self.academic_transitions = [
-            "Moreover,", "Additionally,", "Furthermore,", "Hence,",
-            "Therefore,", "Consequently,", "Nonetheless,", "Nevertheless,"
+            "Moreover,", "Furthermore,", "In addition,",
+            "Consequently,", "Therefore,", "Hence,",
+            "Notably,", "As a result,", "Importantly,",
+            "In this context,", "On the other hand,"
         ]
 
-    # -----------------------------
-    # Core Method
-    # -----------------------------
+        # Contraction map
+        self.contraction_map = {
+            "n't": " not", "'re": " are", "'s": " is", "'ll": " will",
+            "'ve": " have", "'d": " would", "'m": " am",
+        }
+
+    # ------------------------------
+    # Core Function
+    # ------------------------------
     def humanize_text(self, text, use_passive=False, use_synonyms=False):
+        if not text or not isinstance(text, str):
+            return "Invalid input text"
+
         doc = self.nlp(text)
-        transformed = []
+        transformed_sentences = []
 
         for sent in doc.sents:
-            s = sent.text.strip()
-            if not s:
+            sentence = sent.text.strip()
+            if not sentence:
                 continue
 
-            s = self.expand_contractions(s)
+            # 1️⃣ Expand contractions
+            sentence = self.expand_contractions(sentence)
 
-            # Randomly insert academic transition
-            if random.random() < self.p_academic_transition:
-                s = self.add_academic_transitions(s)
+            # 2️⃣ Randomly add academic transitions
+            if random.random() < self.p_academic_transition and not sentence.startswith(tuple(self.academic_transitions)):
+                sentence = self.add_academic_transition(sentence)
 
-            # Optionally apply passive
+            # 3️⃣ Optionally convert some sentences to passive style
             if use_passive and random.random() < self.p_passive:
-                s = self.convert_to_passive(s)
+                sentence = self.convert_to_passive(sentence)
 
-            # Optionally apply synonym replacement
+            # 4️⃣ Optionally replace some words with academic synonyms
             if use_synonyms and random.random() < self.p_synonym_replacement:
-                s = self.replace_with_synonyms(s)
+                sentence = self.replace_with_synonyms(sentence)
 
-            transformed.append(s)
+            transformed_sentences.append(sentence)
 
-        # Combine and cleanup
-        result = " ".join(transformed)
-        result = result.replace(" ,", ",").replace(" .", ".")
-        result = " ".join(result.split())
-        return result.strip()
+        return " ".join(transformed_sentences)
 
-    # -----------------------------
-    # Sub-methods
-    # -----------------------------
+    # ------------------------------
+    # Contraction Expansion
+    # ------------------------------
     def expand_contractions(self, sentence):
-        contraction_map = {
-            "n't": " not", "'re": " are", "'s": " is", "'ll": " will",
-            "'ve": " have", "'d": " would", "'m": " am"
-        }
         tokens = word_tokenize(sentence)
-        expanded = []
+        expanded_tokens = []
         for token in tokens:
-            lower = token.lower()
+            lower_token = token.lower()
             replaced = False
-            for contraction, expansion in contraction_map.items():
-                if lower.endswith(contraction):
-                    new_token = lower.replace(contraction, expansion)
+            for contraction, expansion in self.contraction_map.items():
+                if contraction in lower_token and lower_token.endswith(contraction):
+                    new_token = lower_token.replace(contraction, expansion)
                     if token[0].isupper():
                         new_token = new_token.capitalize()
-                    expanded.append(new_token)
+                    expanded_tokens.append(new_token)
                     replaced = True
                     break
             if not replaced:
-                expanded.append(token)
-        return " ".join(expanded)
+                expanded_tokens.append(token)
+        return " ".join(expanded_tokens)
 
-    def add_academic_transitions(self, sentence):
+    # ------------------------------
+    # Academic Transitions
+    # ------------------------------
+    def add_academic_transition(self, sentence):
         transition = random.choice(self.academic_transitions)
         return f"{transition} {sentence}"
 
+    # ------------------------------
+    # Passive Conversion (simple heuristic)
+    # ------------------------------
     def convert_to_passive(self, sentence):
         doc = self.nlp(sentence)
-        subj = [t for t in doc if t.dep_ == "nsubj" and t.head.dep_ == "ROOT"]
+        subj = [t for t in doc if t.dep_ == "nsubj" and t.head.pos_ == "VERB"]
         dobj = [t for t in doc if t.dep_ == "dobj"]
         if subj and dobj:
             subject = subj[0]
-            dobject = dobj[0]
+            obj = dobj[0]
             verb = subject.head
-            if subject.i < verb.i < dobject.i:
-                passive = f"{dobject.text} {verb.lemma_} by {subject.text}"
-                original = " ".join([t.text for t in doc])
-                chunk = f"{subject.text} {verb.text} {dobject.text}"
-                if chunk in original:
-                    return original.replace(chunk, passive)
+            passive_form = f"{obj.text} is {verb.lemma_} by {subject.text}"
+            return sentence.replace(f"{subject.text} {verb.text} {obj.text}", passive_form)
+        # fallback to a natural passive-like extension
+        if random.random() < 0.5:
+            return sentence + " This is generally acknowledged in academic contexts."
         return sentence
 
+    # ------------------------------
+    # Synonym Replacement
+    # ------------------------------
     def replace_with_synonyms(self, sentence):
         tokens = word_tokenize(sentence)
-        tagged = nltk.pos_tag(tokens)
+        pos_tags = nltk.pos_tag(tokens)
         new_tokens = []
 
-        for word, pos in tagged:
-            if pos.startswith(('J', 'N', 'V', 'R')) and wordnet.synsets(word):
+        for (word, pos) in pos_tags:
+            clean_word = word.strip('.,!?;:"').lower()
+            if pos.startswith(("J", "N", "V", "R")) and len(clean_word) > 3 and wordnet.synsets(clean_word):
                 if random.random() < 0.5:
-                    synonyms = self._get_synonyms(word, pos)
+                    synonyms = self._get_simple_synonyms(clean_word, pos)
                     if synonyms:
-                        chosen = self._select_closest_synonym(word, synonyms)
-                        new_tokens.append(chosen if chosen else word)
-                    else:
-                        new_tokens.append(word)
-                else:
-                    new_tokens.append(word)
-            else:
-                new_tokens.append(word)
+                        chosen = random.choice(synonyms)
+                        if word[0].isupper():
+                            chosen = chosen.capitalize()
+                        new_tokens.append(chosen)
+                        continue
+            new_tokens.append(word)
         return " ".join(new_tokens)
 
-    def _get_synonyms(self, word, pos):
-        wn_pos = (
-            wordnet.ADJ if pos.startswith("J") else
-            wordnet.NOUN if pos.startswith("N") else
-            wordnet.ADV if pos.startswith("R") else
-            wordnet.VERB if pos.startswith("V") else None
-        )
+    def _get_simple_synonyms(self, word, pos):
+        wn_pos = None
+        if pos.startswith("J"):
+            wn_pos = wordnet.ADJ
+        elif pos.startswith("N"):
+            wn_pos = wordnet.NOUN
+        elif pos.startswith("R"):
+            wn_pos = wordnet.ADV
+        elif pos.startswith("V"):
+            wn_pos = wordnet.VERB
 
         synonyms = set()
         for syn in wordnet.synsets(word, pos=wn_pos):
             for lemma in syn.lemmas():
-                lemma_name = lemma.name().replace("_", " ")
-                if lemma_name.lower() != word.lower():
-                    synonyms.add(lemma_name)
+                name = lemma.name().replace("_", " ")
+                if name.lower() != word.lower() and len(name) > 3:
+                    synonyms.add(name)
+                    if len(synonyms) >= 5:
+                        break
+            if len(synonyms) >= 5:
+                break
         return list(synonyms)
 
-    def _select_closest_synonym(self, original, synonyms):
-        if not synonyms:
-            return None
-        orig_emb = self.model.encode(original, convert_to_tensor=True)
-        syn_embs = self.model.encode(synonyms, convert_to_tensor=True)
-        scores = util.cos_sim(orig_emb, syn_embs)[0]
-        best_idx = scores.argmax().item()
-        best_score = scores[best_idx].item()
-        return synonyms[best_idx] if best_score >= 0.5 else None
 
-
-# -----------------------------
-# Example Usage
-# -----------------------------
+# ------------------------------
+# Example Test Run
+# ------------------------------
 if __name__ == "__main__":
-    sample_text = (
-        "We use this method to improve accuracy. "
-        "It's important to achieve consistent performance in real experiments."
-    )
-
-    humanizer = AcademicTextHumanizer(seed=42)
-    result = humanizer.humanize_text(sample_text, use_passive=True, use_synonyms=True)
-    print("\n🔹 Humanized Output:\n", result)
-
+    text = """Artificial intelligence is transforming industries. 
+    Researchers use various algorithms to enhance learning efficiency."""
+    humanizer = AcademicTextHumanizer()
+    print(humanizer.humanize_text(text, use_passive=True, use_synonyms=True))
